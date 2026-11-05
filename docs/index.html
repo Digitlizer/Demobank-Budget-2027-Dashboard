@@ -4,75 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Demo Bank Budget Dashboard</title>
-<meta name="description" content="Budget 2027 dashboard for a fictional bank, built in Power BI. Random sample data.">
 <style>
-  :root{--bg:#F3F5F8;--card:#FFFFFF;--ink:#0F1724;--muted:#5E6878;--line:#E2E7EE;--brand:#14243B;--accent:#38B2C8;--link:#2457A6}
-  @media (prefers-color-scheme: dark){:root{--bg:#0D1420;--card:#152031;--ink:#E7ECF4;--muted:#9DAABD;--line:#24324A;--brand:#14243B;--accent:#5CC6D8;--link:#7FA8E8}}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 "Segoe UI",Inter,system-ui,sans-serif}
-  header{background:var(--brand);border-bottom:3px solid var(--accent);color:#fff}
-  .wrap{max-width:1240px;margin:0 auto;padding:0 16px}
-  header .wrap{display:flex;align-items:center;gap:14px;padding:18px 16px;flex-wrap:wrap}
-  header h1{margin:0;font-size:22px;font-weight:650}
-  header span{color:var(--accent);font-weight:600}
-  header a{margin-left:auto;color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.35);border-radius:8px;padding:6px 12px;font-size:14px}
-  main.wrap{padding-top:24px;padding-bottom:40px}
-  .intro{color:var(--muted);max-width:760px;margin:0 0 18px}
-  .frame{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
-  .frame iframe{display:block;width:100%;aspect-ratio:16/9.6;border:0}
-  .frame img{display:block;width:100%;height:auto}
-  .note{font-size:13px;color:var(--muted);padding:10px 14px;border-top:1px solid var(--line)}
-  h2{font-size:17px;margin:32px 0 12px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:14px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
-  .card b{display:block;margin-bottom:4px}
-  .card p{margin:0;color:var(--muted);font-size:14px}
-  .shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
-  .shots figure{margin:0;min-width:0}
-  .shots img{display:block;width:100%;height:auto;border-radius:12px;border:1px solid var(--line)}
-  .shots figcaption{font-size:13px;color:var(--muted);padding-top:6px}
-  footer{color:var(--muted);font-size:13px;text-align:center;padding:20px 16px 32px}
-  a{color:var(--link)}
+  html,body{margin:0;height:100%;background:#F3F5F8}
+  iframe{display:block;width:100vw;height:100vh;border:0}
 </style>
 </head>
 <body>
-<header><div class="wrap"><h1>Demo Bank: Budget 2027 Dashboard</h1><span>Power BI</span><a id="repo" href="#" hidden>View code on GitHub</a></div></header>
-<main class="wrap">
-  <p class="intro">A bank-wide budget dashboard for top management: flip KPI cards with commentary, a group menu,
-  compare-to buttons, profit bridge, segment scorecard, balance sheet and a 2026 tracker. Demo Bank is fictional and all figures are randomly generated.</p>
-
-  <div class="frame" id="live"></div>
-
-  <h2>What it does</h2>
-  <div class="grid">
-    <div class="card"><b>Flip KPI cards</b><p>Click a card to read the commentary on the back.</p></div>
-    <div class="card"><b>Group menu</b><p>Bank-wide and 8 groups. One click focuses every visual.</p></div>
-    <div class="card"><b>Compare to</b><p>Budget 2027 against Projected Dec-26, Budget 2026 or Actual Dec-25.</p></div>
-    <div class="card"><b>Group input workbooks</b><p>Each group fills its own Excel file. Power BI merges them on refresh.</p></div>
-  </div>
-
-  <h2>Screens</h2>
-  <div class="shots">
-    <figure><img src="images/dashboard_full.png" alt="All HTML visuals" loading="lazy"><figcaption>All HTML visuals: tables, heatmap, tracker and flipped cards</figcaption></figure>
-    <figure><img src="images/layout_executive_summary.png" alt="Executive Summary page layout" loading="lazy"><figcaption>Executive Summary layout</figcaption></figure>
-    <figure><img src="images/donut_legend.png" alt="Donut charts with value legends" loading="lazy"><figcaption>Income and deposit mix</figcaption></figure>
-    <figure><img src="images/input_template.png" alt="Group input workbook" loading="lazy"><figcaption>Group input workbook</figcaption></figure>
-  </div>
-</main>
-<footer>Built by Yasir Ilyas Malik · Power BI, DAX, Power Query · Fictional bank, random data</footer>
-<script>
-  // Paste your Power BI "https://app.powerbi.com/view?r=eyJrIjoiMjlkNDJhMjYtYTEwYi00YzcxLWJkZDQtODQ4ODVjNmFiNWY2IiwidCI6IjQ0YzkzMGM0LTI3OGItNGIwYy1hYjM3LThjNjA4Mjc4ZTQ1NCJ9"
-  const EMBED_URL = "https://app.powerbi.com/view?r=eyJrIjoiMjlkNDJhMjYtYTEwYi00YzcxLWJkZDQtODQ4ODVjNmFiNWY2IiwidCI6IjQ0YzkzMGM0LTI3OGItNGIwYy1hYjM3LThjNjA4Mjc4ZTQ1NCJ9";
-  // Your repository link, for example "https://github.com/your-name/budget-2027-dashboard"
-  const REPO_URL = "";
-  if (REPO_URL) { const r = document.getElementById("repo"); r.href = REPO_URL; r.hidden = false; }
-  const live = document.getElementById("live");
-  if (EMBED_URL) {
-    live.innerHTML = '<iframe title="Budget 2027 Dashboard" src="' + EMBED_URL + '" allowfullscreen></iframe>';
-  } else {
-    live.innerHTML = '<img src="images/dashboard_preview.png" alt="Dashboard preview">' +
-      '<div class="note">Live report coming soon. This is a preview image.</div>';
-  }
-</script>
+<iframe title="Demo Bank Budget 2027 Dashboard" src="https://app.powerbi.com/view?r=eyJrIjoiMjlkNDJhMjYtYTEwYi00YzcxLWJkZDQtODQ4ODVjNmFiNWY2IiwidCI6IjQ0YzkzMGM0LTI3OGItNGIwYy1hYjM3LThjNjA4Mjc4ZTQ1NCJ9" allowfullscreen></iframe>
 </body>
 </html>
