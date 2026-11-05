@@ -1,0 +1,53 @@
+DEMO BANK: BUDGET 2027 DASHBOARD - POWER BI PROJECT (sample data)
+=========================================================================
+
+WHAT IS IN THIS FOLDER
+- DemoBank_Budget2027\DemoBank_Budget2027.pbip    Double-click to open in Power BI Desktop
+- DemoBank_Budget2027_DataModel.xlsx           The data, plus a Commentary sheet for card notes
+- Blank_Layouts\*.png                     Page layouts with every visual box labelled
+- Budget2027_DAX_Measures.dax             All measures as text (backup / reference)
+
+OPEN IT (about 10 minutes)
+1. Update Power BI Desktop to the latest version.
+2. Unzip everything into  E:\Budget2027\
+   (Another folder? Home > Transform data > Edit parameters > DataFile, paste the full path.)
+3. Double-click  DemoBank_Budget2027\DemoBank_Budget2027.pbip
+4. If a visual says it cannot find "HTML Content (lite)":
+   Insert > More visuals > From AppSource > search "HTML Content (lite)" > Add.
+   It is a Microsoft-certified visual (no scripts, no internet calls). The boxes then fill in.
+5. Home > Refresh.
+
+HOW TO USE
+- Left menu: click a group to focus every visual on the page. Click it again to go back to Bank-wide.
+- Compare to / Units: buttons under the menu. These stay in sync on all pages.
+- KPI cards: click a card to flip it and read the commentary. Click again to flip back.
+- Notes on the back of a card: type them in the Commentary sheet of the Excel file
+  (UnitCode + LineNo + Note), save, then Refresh.
+
+GROUP INPUT WORKBOOKS (budget collection)
+1. Send each group its file from Group_Templates (Budget2027_Input_RBG_TEMPLATE.xlsx and so on).
+   Groups type in yellow cells only, check the 'Checks' sheet says READY TO SUBMIT, and send it back.
+2. Save the returned files in  E:\Budget2027\Inputs\  (any file name, .xlsx). Close them in Excel before you refresh.
+3. In Power BI: Home > Refresh. For each group and period, the group's numbers replace the central ones.
+   Groups that have not submitted keep the central figures. Bank-wide P&L, advances and deposits
+   become the sum of the 8 groups. Product mix at bank level is rebuilt once all 8 files are in.
+4. To test now: copy the 8 files from Sample_Inputs into Inputs and Refresh. They hold today's figures.
+   P&L and balance totals stay the same, because the samples hold the same figures as the main file.
+   The bank-level deposit mix is rebuilt from the group files, so it shows the group breakdown.
+Different folder? Home > Transform data > Edit parameters > InputFolder.
+If Power BI asks about privacy levels, choose Organizational for both files (or File > Options >
+Privacy > Ignore privacy levels).
+
+MONTHLY UPDATE
+Historical actuals: replace rows in the central Excel tables. Budget inputs: replace files in Inputs.
+Then Refresh in Power BI.
+
+CHANGE THE LAYOUT YOURSELF
+- Move or resize any visual: click it > Format pane > General > Properties > Size and position
+  (X, Y, Width, Height in pixels). Or drag its corners.
+- The left-panel labels (BUSINESS UNIT, COMPARE TO, UNITS) are the visuals' own titles, so they move
+  with the visual. Change them in Format > General > Title.
+- The page background (dark header and left panel) is an image: Format page > Canvas background.
+  The images have no text in the panel, so any layout fits.
+- Same change on every page: change it on one page, then copy the visual (Ctrl+C) and paste it (Ctrl+V)
+  on the other pages. A pasted slicer asks to keep it in sync: choose Sync.

@@ -1,0 +1,1 @@
+Put the returned group input workbooks (.xlsx) here. Power BI reads every .xlsx in this folder.

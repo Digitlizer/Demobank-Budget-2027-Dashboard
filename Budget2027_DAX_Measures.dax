@@ -1,0 +1,1843 @@
+// Helper tables: Modeling > New table, one at a time.
+
+Unit Selector =
+SELECTCOLUMNS (
+    Dim_Unit,
+    "UnitCode", Dim_Unit[UnitCode],
+    "Unit", Dim_Unit[ShortName],
+    "UnitName", Dim_Unit[UnitName],
+    "Level", Dim_Unit[Level],
+    "SortOrder", Dim_Unit[SortOrder]
+)
+
+Compare Period =
+DATATABLE (
+    "PeriodKey", STRING, "Compare To", STRING, "Sort", INTEGER,
+    {
+        { "P2026", "Projected Dec-26", 1 },
+        { "B2026", "Budget 2026", 2 },
+        { "A2025", "Actual Dec-25", 3 }
+    }
+)
+
+Scale =
+DATATABLE (
+    "Scale", STRING, "Divisor", INTEGER, "Sort", INTEGER,
+    { { "PKR Bn", 1000, 1 }, { "PKR Mn", 1, 2 } }
+)
+
+Bridge Steps =
+DATATABLE (
+    "Step", STRING, "Sort", INTEGER, "LineNo", INTEGER, "Sign", INTEGER, "IsStart", INTEGER,
+    {
+        { "PBT compare", 1, 28, 1, 1 },
+        { "NII", 2, 8, 1, 0 },
+        { "Non-interest", 3, 15, 1, 0 },
+        { "Admin exp", 4, 23, -1, 0 },
+        { "Provisions", 5, 26, 1, 0 }
+    }
+)
+
+Tracker Line =
+DATATABLE (
+    "Metric", STRING, "LineNo", INTEGER, "HigherIsBetter", INTEGER, "Sort", INTEGER,
+    {
+        { "Profit before Tax", 28, 1, 1 },
+        { "Total Income", 16, 1, 2 },
+        { "Net Interest Income", 8, 1, 3 },
+        { "Non-Interest Income", 15, 1, 4 },
+        { "Admin Expenses", 23, 0, 5 }
+    }
+)
+
+Income Mix =
+DATATABLE (
+    "Component", STRING, "LineNo", INTEGER, "Sort", INTEGER,
+    {
+        { "Net interest", 8, 1 },
+        { "Commission", 10, 2 },
+        { "Exchange", 12, 3 },
+        { "Dividend", 11, 4 },
+        { "Capital gain", 14, 5 },
+        { "Other income", 13, 6 }
+    }
+)
+
+// Budget 2027 Dashboard: all measures for DAX query view (fallback if you build the model by hand).
+// Home > Enter data > table _Measures, then paste from DEFINE and click 'Update model with changes'.
+
+DEFINE
+MEASURE _Measures[Divisor] =
+    SELECTEDVALUE ( Scale[Divisor], 1000 )
+MEASURE _Measures[Unit Label] =
+    SELECTEDVALUE ( Scale[Scale], "PKR Bn" )
+MEASURE _Measures[Compare Key] =
+    SELECTEDVALUE ( 'Compare Period'[PeriodKey], "P2026" )
+MEASURE _Measures[Compare Label] =
+    SELECTEDVALUE ( 'Compare Period'[Compare To], "Projected Dec-26" )
+MEASURE _Measures[Selected Unit Code] =
+    SELECTEDVALUE ( 'Unit Selector'[UnitCode], "BANK" )
+MEASURE _Measures[Selected Unit Name] =
+    SELECTEDVALUE ( 'Unit Selector'[UnitName], "Bank-wide" )
+MEASURE _Measures[Amount (Axis)] =
+    DIVIDE ( SUM ( Fact_PL[Amount_PKR_Mn] ), [Divisor] )
+MEASURE _Measures[Amount] =
+    VAR _u = [Selected Unit Code]
+    RETURN CALCULATE ( [Amount (Axis)], Dim_Unit[UnitCode] = _u )
+MEASURE _Measures[Budget 2027] =
+    CALCULATE ( [Amount], Dim_Period[PeriodKey] = "B2027" )
+MEASURE _Measures[Compare Value] =
+    VAR _k = [Compare Key]
+    RETURN CALCULATE ( [Amount], Dim_Period[PeriodKey] = _k )
+MEASURE _Measures[YTD Sep-26] =
+    CALCULATE ( [Amount], Dim_Period[PeriodKey] = "A2026S" )
+MEASURE _Measures[Projected Dec-26] =
+    CALCULATE ( [Amount], Dim_Period[PeriodKey] = "P2026" )
+MEASURE _Measures[Budget 2026] =
+    CALCULATE ( [Amount], Dim_Period[PeriodKey] = "B2026" )
+MEASURE _Measures[Actual Dec-25] =
+    CALCULATE ( [Amount], Dim_Period[PeriodKey] = "A2025" )
+MEASURE _Measures[Actual Dec-24] =
+    CALCULATE ( [Amount], Dim_Period[PeriodKey] = "A2024" )
+MEASURE _Measures[Variance] =
+    VAR _b = [Budget 2027]
+    VAR _c = [Compare Value]
+    RETURN IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c )
+MEASURE _Measures[Variance %] =
+    DIVIDE ( [Variance], ABS ( [Compare Value] ) )
+MEASURE _Measures[Variance Direction] =
+    VAR _v = [Variance]
+    VAR _hib = SELECTEDVALUE ( Dim_Line[HigherIsBetter], 1 )
+    RETURN IF ( ISBLANK ( _v ) || _v = 0, 0, IF ( ( _v > 0 ) = ( _hib = 1 ), 1, -1 ) )
+MEASURE _Measures[Variance Colour] =
+    SWITCH ( [Variance Direction], 1, "#067647", -1, "#B42318", "#6B7586" )
+MEASURE _Measures[One] =
+    1
+MEASURE _Measures[Compare Short] =
+    SWITCH ( [Compare Key], "P2026", "Proj Dec-26", "B2026", "Bud 2026", "A2025", "Act Dec-25", "compare" )
+MEASURE _Measures[PBT B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 28 )
+MEASURE _Measures[PBT Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 28 )
+MEASURE _Measures[PBT YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 28 )
+MEASURE _Measures[PBT Var %] =
+    IF ( NOT ISBLANK ( [PBT B27] ) && NOT ISBLANK ( [PBT Cmp] ), DIVIDE ( [PBT B27] - [PBT Cmp], ABS ( [PBT Cmp] ) ) )
+MEASURE _Measures[PBT Sub] =
+    VAR _p = [PBT Var %]
+    RETURN
+        IF (
+            ISBLANK ( [PBT Cmp] ) || ISBLANK ( [PBT B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[PBT Colour] =
+    VAR _d = [PBT B27] - [PBT Cmp]
+    RETURN IF ( ISBLANK ( [PBT Cmp] ) || ISBLANK ( [PBT B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[Total Income B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 16 )
+MEASURE _Measures[Total Income Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 16 )
+MEASURE _Measures[Total Income YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 16 )
+MEASURE _Measures[Total Income Var %] =
+    IF ( NOT ISBLANK ( [Total Income B27] ) && NOT ISBLANK ( [Total Income Cmp] ), DIVIDE ( [Total Income B27] - [Total Income Cmp], ABS ( [Total Income Cmp] ) ) )
+MEASURE _Measures[Total Income Sub] =
+    VAR _p = [Total Income Var %]
+    RETURN
+        IF (
+            ISBLANK ( [Total Income Cmp] ) || ISBLANK ( [Total Income B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[Total Income Colour] =
+    VAR _d = [Total Income B27] - [Total Income Cmp]
+    RETURN IF ( ISBLANK ( [Total Income Cmp] ) || ISBLANK ( [Total Income B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[NII B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 8 )
+MEASURE _Measures[NII Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 8 )
+MEASURE _Measures[NII YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 8 )
+MEASURE _Measures[NII Var %] =
+    IF ( NOT ISBLANK ( [NII B27] ) && NOT ISBLANK ( [NII Cmp] ), DIVIDE ( [NII B27] - [NII Cmp], ABS ( [NII Cmp] ) ) )
+MEASURE _Measures[NII Sub] =
+    VAR _p = [NII Var %]
+    RETURN
+        IF (
+            ISBLANK ( [NII Cmp] ) || ISBLANK ( [NII B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[NII Colour] =
+    VAR _d = [NII B27] - [NII Cmp]
+    RETURN IF ( ISBLANK ( [NII Cmp] ) || ISBLANK ( [NII B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[Non-II B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 15 )
+MEASURE _Measures[Non-II Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 15 )
+MEASURE _Measures[Non-II YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 15 )
+MEASURE _Measures[Non-II Var %] =
+    IF ( NOT ISBLANK ( [Non-II B27] ) && NOT ISBLANK ( [Non-II Cmp] ), DIVIDE ( [Non-II B27] - [Non-II Cmp], ABS ( [Non-II Cmp] ) ) )
+MEASURE _Measures[Non-II Sub] =
+    VAR _p = [Non-II Var %]
+    RETURN
+        IF (
+            ISBLANK ( [Non-II Cmp] ) || ISBLANK ( [Non-II B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[Non-II Colour] =
+    VAR _d = [Non-II B27] - [Non-II Cmp]
+    RETURN IF ( ISBLANK ( [Non-II Cmp] ) || ISBLANK ( [Non-II B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[Admin Exp B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 23 )
+MEASURE _Measures[Admin Exp Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 23 )
+MEASURE _Measures[Admin Exp YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 23 )
+MEASURE _Measures[Admin Exp Var %] =
+    IF ( NOT ISBLANK ( [Admin Exp B27] ) && NOT ISBLANK ( [Admin Exp Cmp] ), DIVIDE ( [Admin Exp B27] - [Admin Exp Cmp], ABS ( [Admin Exp Cmp] ) ) )
+MEASURE _Measures[Admin Exp Sub] =
+    VAR _p = [Admin Exp Var %]
+    RETURN
+        IF (
+            ISBLANK ( [Admin Exp Cmp] ) || ISBLANK ( [Admin Exp B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[Admin Exp Colour] =
+    VAR _d = [Admin Exp B27] - [Admin Exp Cmp]
+    RETURN IF ( ISBLANK ( [Admin Exp Cmp] ) || ISBLANK ( [Admin Exp B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 0 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[Staff Cost B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 18 )
+MEASURE _Measures[Staff Cost Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 18 )
+MEASURE _Measures[Staff Cost YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 18 )
+MEASURE _Measures[Staff Cost Var %] =
+    IF ( NOT ISBLANK ( [Staff Cost B27] ) && NOT ISBLANK ( [Staff Cost Cmp] ), DIVIDE ( [Staff Cost B27] - [Staff Cost Cmp], ABS ( [Staff Cost Cmp] ) ) )
+MEASURE _Measures[Staff Cost Sub] =
+    VAR _p = [Staff Cost Var %]
+    RETURN
+        IF (
+            ISBLANK ( [Staff Cost Cmp] ) || ISBLANK ( [Staff Cost B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[Staff Cost Colour] =
+    VAR _d = [Staff Cost B27] - [Staff Cost Cmp]
+    RETURN IF ( ISBLANK ( [Staff Cost Cmp] ) || ISBLANK ( [Staff Cost B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 0 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[Op Profit B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 24 )
+MEASURE _Measures[Op Profit Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 24 )
+MEASURE _Measures[Op Profit YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 24 )
+MEASURE _Measures[Op Profit Var %] =
+    IF ( NOT ISBLANK ( [Op Profit B27] ) && NOT ISBLANK ( [Op Profit Cmp] ), DIVIDE ( [Op Profit B27] - [Op Profit Cmp], ABS ( [Op Profit Cmp] ) ) )
+MEASURE _Measures[Op Profit Sub] =
+    VAR _p = [Op Profit Var %]
+    RETURN
+        IF (
+            ISBLANK ( [Op Profit Cmp] ) || ISBLANK ( [Op Profit B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[Op Profit Colour] =
+    VAR _d = [Op Profit B27] - [Op Profit Cmp]
+    RETURN IF ( ISBLANK ( [Op Profit Cmp] ) || ISBLANK ( [Op Profit B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[PAT B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 30 )
+MEASURE _Measures[PAT Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 30 )
+MEASURE _Measures[PAT YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 30 )
+MEASURE _Measures[PAT Var %] =
+    IF ( NOT ISBLANK ( [PAT B27] ) && NOT ISBLANK ( [PAT Cmp] ), DIVIDE ( [PAT B27] - [PAT Cmp], ABS ( [PAT Cmp] ) ) )
+MEASURE _Measures[PAT Sub] =
+    VAR _p = [PAT Var %]
+    RETURN
+        IF (
+            ISBLANK ( [PAT Cmp] ) || ISBLANK ( [PAT B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[PAT Colour] =
+    VAR _d = [PAT B27] - [PAT Cmp]
+    RETURN IF ( ISBLANK ( [PAT Cmp] ) || ISBLANK ( [PAT B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[Advances B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 31 )
+MEASURE _Measures[Advances Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 31 )
+MEASURE _Measures[Advances YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 31 )
+MEASURE _Measures[Advances Var %] =
+    IF ( NOT ISBLANK ( [Advances B27] ) && NOT ISBLANK ( [Advances Cmp] ), DIVIDE ( [Advances B27] - [Advances Cmp], ABS ( [Advances Cmp] ) ) )
+MEASURE _Measures[Advances Sub] =
+    VAR _p = [Advances Var %]
+    RETURN
+        IF (
+            ISBLANK ( [Advances Cmp] ) || ISBLANK ( [Advances B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[Advances Colour] =
+    VAR _d = [Advances B27] - [Advances Cmp]
+    RETURN IF ( ISBLANK ( [Advances Cmp] ) || ISBLANK ( [Advances B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[Deposits B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 33 )
+MEASURE _Measures[Deposits Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 33 )
+MEASURE _Measures[Deposits YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 33 )
+MEASURE _Measures[Deposits Var %] =
+    IF ( NOT ISBLANK ( [Deposits B27] ) && NOT ISBLANK ( [Deposits Cmp] ), DIVIDE ( [Deposits B27] - [Deposits Cmp], ABS ( [Deposits Cmp] ) ) )
+MEASURE _Measures[Deposits Sub] =
+    VAR _p = [Deposits Var %]
+    RETURN
+        IF (
+            ISBLANK ( [Deposits Cmp] ) || ISBLANK ( [Deposits B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[Deposits Colour] =
+    VAR _d = [Deposits B27] - [Deposits Cmp]
+    RETURN IF ( ISBLANK ( [Deposits Cmp] ) || ISBLANK ( [Deposits B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[Investments B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 35 )
+MEASURE _Measures[Investments Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 35 )
+MEASURE _Measures[Investments YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 35 )
+MEASURE _Measures[Investments Var %] =
+    IF ( NOT ISBLANK ( [Investments B27] ) && NOT ISBLANK ( [Investments Cmp] ), DIVIDE ( [Investments B27] - [Investments Cmp], ABS ( [Investments Cmp] ) ) )
+MEASURE _Measures[Investments Sub] =
+    VAR _p = [Investments Var %]
+    RETURN
+        IF (
+            ISBLANK ( [Investments Cmp] ) || ISBLANK ( [Investments B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[Investments Colour] =
+    VAR _d = [Investments B27] - [Investments Cmp]
+    RETURN IF ( ISBLANK ( [Investments Cmp] ) || ISBLANK ( [Investments B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[Borrowings B27] =
+    CALCULATE ( [Budget 2027], Dim_Line[LineNo] = 37 )
+MEASURE _Measures[Borrowings Cmp] =
+    CALCULATE ( [Compare Value], Dim_Line[LineNo] = 37 )
+MEASURE _Measures[Borrowings YTD] =
+    CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 37 )
+MEASURE _Measures[Borrowings Var %] =
+    IF ( NOT ISBLANK ( [Borrowings B27] ) && NOT ISBLANK ( [Borrowings Cmp] ), DIVIDE ( [Borrowings B27] - [Borrowings Cmp], ABS ( [Borrowings Cmp] ) ) )
+MEASURE _Measures[Borrowings Sub] =
+    VAR _p = [Borrowings Var %]
+    RETURN
+        IF (
+            ISBLANK ( [Borrowings Cmp] ) || ISBLANK ( [Borrowings B27] ),
+            "No comparison",
+            IF ( _p >= 0, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) & "  vs " & [Compare Label]
+        )
+MEASURE _Measures[Borrowings Colour] =
+    VAR _d = [Borrowings B27] - [Borrowings Cmp]
+    RETURN IF ( ISBLANK ( [Borrowings Cmp] ) || ISBLANK ( [Borrowings B27] ) || _d = 0, "#6B7586", IF ( ( _d > 0 ) = ( 1 = 1 ), "#067647", "#B42318" ) )
+MEASURE _Measures[PBT Card Sub] =
+    [PBT Sub]
+MEASURE _Measures[Cost to Income B27] =
+    DIVIDE ( [Admin Exp B27], [Total Income B27] )
+MEASURE _Measures[Cost to Income Cmp] =
+    DIVIDE ( [Admin Exp Cmp], [Total Income Cmp] )
+MEASURE _Measures[Cost to Income Chg pp] =
+    ( [Cost to Income B27] - [Cost to Income Cmp] ) * 100
+MEASURE _Measures[NII Share B27] =
+    DIVIDE ( [NII B27], [Total Income B27] )
+MEASURE _Measures[NII Share Cmp] =
+    DIVIDE ( [NII Cmp], [Total Income Cmp] )
+MEASURE _Measures[Profit Margin B27] =
+    DIVIDE ( [PBT B27], [Total Income B27] )
+MEASURE _Measures[Profit Margin Cmp] =
+    DIVIDE ( [PBT Cmp], [Total Income Cmp] )
+MEASURE _Measures[Staff Cost Share B27] =
+    DIVIDE ( [Staff Cost B27], [Admin Exp B27] )
+MEASURE _Measures[Staff Cost Share Cmp] =
+    DIVIDE ( [Staff Cost Cmp], [Admin Exp Cmp] )
+MEASURE _Measures[ADR B27] =
+    DIVIDE ( [Advances B27], [Deposits B27] )
+MEASURE _Measures[ADR Cmp] =
+    DIVIDE ( [Advances Cmp], [Deposits Cmp] )
+MEASURE _Measures[ADR Sub] =
+    IF ( ISBLANK ( [ADR B27] ), "No deposits budgeted", "was " & FORMAT ( [ADR Cmp], "0.0%" ) & " in " & [Compare Label] )
+MEASURE _Measures[Bridge Impact] =
+    VAR _n = SELECTEDVALUE ( 'Bridge Steps'[LineNo] )
+    VAR _s = SELECTEDVALUE ( 'Bridge Steps'[Sign] )
+    VAR _start = SELECTEDVALUE ( 'Bridge Steps'[IsStart] )
+    VAR _b = CALCULATE ( [Budget 2027], Dim_Line[LineNo] = _n )
+    VAR _c = CALCULATE ( [Compare Value], Dim_Line[LineNo] = _n )
+    RETURN IF ( _start = 1, _c, _s * ( _b - _c ) )
+MEASURE _Measures[Trend Total Income] =
+    IF ( NOT ( SELECTEDVALUE ( Dim_Period[PeriodKey] ) IN { "A2026S", "B2026" } ), CALCULATE ( [Amount], Dim_Line[LineNo] = 16 ) )
+MEASURE _Measures[Trend Admin Exp] =
+    IF ( NOT ( SELECTEDVALUE ( Dim_Period[PeriodKey] ) IN { "A2026S", "B2026" } ), CALCULATE ( [Amount], Dim_Line[LineNo] = 23 ) )
+MEASURE _Measures[Trend PBT] =
+    IF ( NOT ( SELECTEDVALUE ( Dim_Period[PeriodKey] ) IN { "A2026S", "B2026" } ), CALCULATE ( [Amount], Dim_Line[LineNo] = 28 ) )
+MEASURE _Measures[Trend Advances] =
+    IF ( NOT ( SELECTEDVALUE ( Dim_Period[PeriodKey] ) IN { "A2026S", "B2026" } ), CALCULATE ( [Amount], Dim_Line[LineNo] = 31 ) )
+MEASURE _Measures[Trend Deposits] =
+    IF ( NOT ( SELECTEDVALUE ( Dim_Period[PeriodKey] ) IN { "A2026S", "B2026" } ), CALCULATE ( [Amount], Dim_Line[LineNo] = 33 ) )
+MEASURE _Measures[Trend Colour] =
+    SWITCH (
+        LEFT ( SELECTEDVALUE ( Dim_Period[PeriodKey] ), 1 ),
+        "A", "#2457A6",
+        "P", "#8CCBAA",
+        "B", "#38B2C8",
+        "#A3ABB8"
+    )
+MEASURE _Measures[Income Mix B27] =
+    VAR _n = SELECTEDVALUE ( 'Income Mix'[LineNo] )
+    VAR _v = CALCULATE ( [Budget 2027], Dim_Line[LineNo] = _n )
+    RETURN IF ( _v > 0, _v )
+MEASURE _Measures[Deposit Mix B27] =
+    VAR _v = CALCULATE ( [Portfolio B27], Fact_Portfolio[Portfolio] = "Deposits", Fact_Portfolio[Metric] = "Absolute", Dim_Product[RowType] = "Product" )
+    RETURN IF ( _v > 0, _v )
+MEASURE _Measures[Advances Mix B27] =
+    VAR _u = [Selected Unit Code]
+    VAR _hasProducts =
+        NOT ISEMPTY (
+            CALCULATETABLE ( Fact_Portfolio, Fact_Portfolio[UnitCode] = _u, Fact_Portfolio[Portfolio] = "Advances", Dim_Product[RowType] = "Product", REMOVEFILTERS ( Dim_Product ) )
+        )
+    VAR _rt = SELECTEDVALUE ( Dim_Product[RowType] )
+    VAR _keep =
+        IF ( _u = "BANK", _rt IN { "Group Total", "Adjustment" }, IF ( _hasProducts, _rt = "Product", _rt = "Group Total" ) )
+    RETURN
+        IF ( _keep, CALCULATE ( [Portfolio B27], Fact_Portfolio[Portfolio] = "Advances", Fact_Portfolio[Metric] = "Absolute" ) )
+MEASURE _Measures[Advances Mix Cmp] =
+    IF (
+        NOT ISBLANK ( [Advances Mix B27] ),
+        CALCULATE ( [Portfolio Cmp], Fact_Portfolio[Portfolio] = "Advances", Fact_Portfolio[Metric] = "Absolute" )
+    )
+MEASURE _Measures[Mover Impact] =
+    VAR _n = SELECTEDVALUE ( Dim_Line[LineNo] )
+    VAR _s =
+        SWITCH ( TRUE (), _n IN { 2, 3, 5, 6, 10, 11, 12, 13, 14, 26 }, 1, _n IN { 18, 19 }, -1, 0 )
+    VAR _d = _s * ( [Budget 2027] - [Compare Value] )
+    RETURN IF ( _s <> 0 && ABS ( _d ) > 0.0001, _d )
+MEASURE _Measures[Mover Colour] =
+    IF ( [Mover Impact] >= 0, "#067647", "#B42318" )
+MEASURE _Measures[Seg Income B27] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 16, Dim_Period[PeriodKey] = "B2027" ) )
+MEASURE _Measures[Seg Income Cmp] =
+    VAR _k = [Compare Key]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 16, Dim_Period[PeriodKey] = _k ) )
+MEASURE _Measures[Seg Income Var %] =
+    VAR _b = [Seg Income B27]
+    VAR _c = [Seg Income Cmp]
+    RETURN IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+MEASURE _Measures[Seg Income Heat] =
+    VAR _p = [Seg Income Var %]
+    VAR _good = ( _p > 0 ) = ( 1 = 1 )
+    VAR _a = ABS ( _p )
+    RETURN
+        SWITCH (
+            TRUE (),
+            ISBLANK ( _p ) || _p = 0, "#F1F3F7",
+            _good && _a >= 0.25, "#8FCFAE",
+            _good && _a >= 0.08, "#C4E6D3",
+            _good, "#E6F4EC",
+            _a >= 0.25, "#EFA39A",
+            _a >= 0.08, "#F6CCC6",
+            "#FBE7E4"
+        )
+MEASURE _Measures[Seg NII B27] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 8, Dim_Period[PeriodKey] = "B2027" ) )
+MEASURE _Measures[Seg NII Cmp] =
+    VAR _k = [Compare Key]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 8, Dim_Period[PeriodKey] = _k ) )
+MEASURE _Measures[Seg NII Var %] =
+    VAR _b = [Seg NII B27]
+    VAR _c = [Seg NII Cmp]
+    RETURN IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+MEASURE _Measures[Seg NII Heat] =
+    VAR _p = [Seg NII Var %]
+    VAR _good = ( _p > 0 ) = ( 1 = 1 )
+    VAR _a = ABS ( _p )
+    RETURN
+        SWITCH (
+            TRUE (),
+            ISBLANK ( _p ) || _p = 0, "#F1F3F7",
+            _good && _a >= 0.25, "#8FCFAE",
+            _good && _a >= 0.08, "#C4E6D3",
+            _good, "#E6F4EC",
+            _a >= 0.25, "#EFA39A",
+            _a >= 0.08, "#F6CCC6",
+            "#FBE7E4"
+        )
+MEASURE _Measures[Seg Non-II B27] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 15, Dim_Period[PeriodKey] = "B2027" ) )
+MEASURE _Measures[Seg Non-II Cmp] =
+    VAR _k = [Compare Key]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 15, Dim_Period[PeriodKey] = _k ) )
+MEASURE _Measures[Seg Non-II Var %] =
+    VAR _b = [Seg Non-II B27]
+    VAR _c = [Seg Non-II Cmp]
+    RETURN IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+MEASURE _Measures[Seg Non-II Heat] =
+    VAR _p = [Seg Non-II Var %]
+    VAR _good = ( _p > 0 ) = ( 1 = 1 )
+    VAR _a = ABS ( _p )
+    RETURN
+        SWITCH (
+            TRUE (),
+            ISBLANK ( _p ) || _p = 0, "#F1F3F7",
+            _good && _a >= 0.25, "#8FCFAE",
+            _good && _a >= 0.08, "#C4E6D3",
+            _good, "#E6F4EC",
+            _a >= 0.25, "#EFA39A",
+            _a >= 0.08, "#F6CCC6",
+            "#FBE7E4"
+        )
+MEASURE _Measures[Seg Admin B27] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 23, Dim_Period[PeriodKey] = "B2027" ) )
+MEASURE _Measures[Seg Admin Cmp] =
+    VAR _k = [Compare Key]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 23, Dim_Period[PeriodKey] = _k ) )
+MEASURE _Measures[Seg Admin Var %] =
+    VAR _b = [Seg Admin B27]
+    VAR _c = [Seg Admin Cmp]
+    RETURN IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+MEASURE _Measures[Seg Admin Heat] =
+    VAR _p = [Seg Admin Var %]
+    VAR _good = ( _p > 0 ) = ( 0 = 1 )
+    VAR _a = ABS ( _p )
+    RETURN
+        SWITCH (
+            TRUE (),
+            ISBLANK ( _p ) || _p = 0, "#F1F3F7",
+            _good && _a >= 0.25, "#8FCFAE",
+            _good && _a >= 0.08, "#C4E6D3",
+            _good, "#E6F4EC",
+            _a >= 0.25, "#EFA39A",
+            _a >= 0.08, "#F6CCC6",
+            "#FBE7E4"
+        )
+MEASURE _Measures[Seg PBT B27] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "B2027" ) )
+MEASURE _Measures[Seg PBT Cmp] =
+    VAR _k = [Compare Key]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = _k ) )
+MEASURE _Measures[Seg PBT Var %] =
+    VAR _b = [Seg PBT B27]
+    VAR _c = [Seg PBT Cmp]
+    RETURN IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+MEASURE _Measures[Seg PBT Heat] =
+    VAR _p = [Seg PBT Var %]
+    VAR _good = ( _p > 0 ) = ( 1 = 1 )
+    VAR _a = ABS ( _p )
+    RETURN
+        SWITCH (
+            TRUE (),
+            ISBLANK ( _p ) || _p = 0, "#F1F3F7",
+            _good && _a >= 0.25, "#8FCFAE",
+            _good && _a >= 0.08, "#C4E6D3",
+            _good, "#E6F4EC",
+            _a >= 0.25, "#EFA39A",
+            _a >= 0.08, "#F6CCC6",
+            "#FBE7E4"
+        )
+MEASURE _Measures[Seg Advances B27] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 31, Dim_Period[PeriodKey] = "B2027" ) )
+MEASURE _Measures[Seg Advances Cmp] =
+    VAR _k = [Compare Key]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 31, Dim_Period[PeriodKey] = _k ) )
+MEASURE _Measures[Seg Advances Var %] =
+    VAR _b = [Seg Advances B27]
+    VAR _c = [Seg Advances Cmp]
+    RETURN IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+MEASURE _Measures[Seg Advances Heat] =
+    VAR _p = [Seg Advances Var %]
+    VAR _good = ( _p > 0 ) = ( 1 = 1 )
+    VAR _a = ABS ( _p )
+    RETURN
+        SWITCH (
+            TRUE (),
+            ISBLANK ( _p ) || _p = 0, "#F1F3F7",
+            _good && _a >= 0.25, "#8FCFAE",
+            _good && _a >= 0.08, "#C4E6D3",
+            _good, "#E6F4EC",
+            _a >= 0.25, "#EFA39A",
+            _a >= 0.08, "#F6CCC6",
+            "#FBE7E4"
+        )
+MEASURE _Measures[Seg Deposits B27] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 33, Dim_Period[PeriodKey] = "B2027" ) )
+MEASURE _Measures[Seg Deposits Cmp] =
+    VAR _k = [Compare Key]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 33, Dim_Period[PeriodKey] = _k ) )
+MEASURE _Measures[Seg Deposits Var %] =
+    VAR _b = [Seg Deposits B27]
+    VAR _c = [Seg Deposits Cmp]
+    RETURN IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+MEASURE _Measures[Seg Deposits Heat] =
+    VAR _p = [Seg Deposits Var %]
+    VAR _good = ( _p > 0 ) = ( 1 = 1 )
+    VAR _a = ABS ( _p )
+    RETURN
+        SWITCH (
+            TRUE (),
+            ISBLANK ( _p ) || _p = 0, "#F1F3F7",
+            _good && _a >= 0.25, "#8FCFAE",
+            _good && _a >= 0.08, "#C4E6D3",
+            _good, "#E6F4EC",
+            _a >= 0.25, "#EFA39A",
+            _a >= 0.08, "#F6CCC6",
+            "#FBE7E4"
+        )
+MEASURE _Measures[Seg PBT B27 L1] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) = 1, [Seg PBT B27] )
+MEASURE _Measures[Seg PBT Cmp L1] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) = 1, [Seg PBT Cmp] )
+MEASURE _Measures[Seg Bar Colour] =
+    VAR _sel = [Selected Unit Code]
+    VAR _me = SELECTEDVALUE ( Dim_Unit[UnitCode] )
+    RETURN IF ( _sel = "BANK" || _sel = _me, "#2457A6", "#A3ABB8" )
+MEASURE _Measures[Seg Share of Bank PBT] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, DIVIDE ( [Seg PBT B27], CALCULATE ( [Seg PBT B27], Dim_Unit[UnitCode] = "BANK" ) ) )
+MEASURE _Measures[Seg Cost to Income] =
+    IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, DIVIDE ( [Seg Admin B27], [Seg Income B27] ) )
+MEASURE _Measures[Seg Landing %] =
+    VAR _b = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "B2026" )
+    VAR _p = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "P2026" )
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1 && _b > 0, DIVIDE ( _p, _b ) )
+MEASURE _Measures[Seg Landing Colour] =
+    VAR _r = [Seg Landing %]
+    RETURN SWITCH ( TRUE (), _r >= 0.995, "#2457A6", _r >= 0.9, "#38B2C8", "#B42318" )
+MEASURE _Measures[PLS Actual Dec-25] =
+    IF ( SELECTEDVALUE ( Dim_Line[LineNo] ) IN { 8, 15, 16, 23, 24, 26, 28, 30 }, [Actual Dec-25] )
+MEASURE _Measures[PLS Projected Dec-26] =
+    IF ( SELECTEDVALUE ( Dim_Line[LineNo] ) IN { 8, 15, 16, 23, 24, 26, 28, 30 }, [Projected Dec-26] )
+MEASURE _Measures[PLS Budget 2027] =
+    IF ( SELECTEDVALUE ( Dim_Line[LineNo] ) IN { 8, 15, 16, 23, 24, 26, 28, 30 }, [Budget 2027] )
+MEASURE _Measures[PLS Var %] =
+    IF ( SELECTEDVALUE ( Dim_Line[LineNo] ) IN { 8, 15, 16, 23, 24, 26, 28, 30 }, [Variance %] )
+MEASURE _Measures[Portfolio Amount] =
+    VAR _u = [Selected Unit Code]
+    RETURN CALCULATE ( DIVIDE ( SUM ( Fact_Portfolio[Amount_PKR_Mn] ), [Divisor] ), Fact_Portfolio[UnitCode] = _u )
+MEASURE _Measures[Portfolio B27] =
+    CALCULATE ( [Portfolio Amount], Fact_Portfolio[PeriodKey] = "B2027" )
+MEASURE _Measures[Portfolio Cmp] =
+    VAR _k = [Compare Key]
+    RETURN CALCULATE ( [Portfolio Amount], Fact_Portfolio[PeriodKey] = _k )
+MEASURE _Measures[Current Deposits Share B27] =
+    DIVIDE (
+        CALCULATE ( [Portfolio B27], Fact_Portfolio[Portfolio] = "Deposits", Fact_Portfolio[Product] = "Current", Fact_Portfolio[Metric] = "Absolute" ),
+        CALCULATE ( [Portfolio B27], Fact_Portfolio[Portfolio] = "Deposits", Fact_Portfolio[Product] = "Total Deposits", Fact_Portfolio[Metric] = "Absolute" )
+    )
+MEASURE _Measures[Trk Line] =
+    SELECTEDVALUE ( 'Tracker Line'[LineNo], 28 )
+MEASURE _Measures[Trk HIB] =
+    SELECTEDVALUE ( 'Tracker Line'[HigherIsBetter], 1 )
+MEASURE _Measures[Trk Budget 2026] =
+    VAR _n = [Trk Line]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = _n, Dim_Period[PeriodKey] = "B2026" ) )
+MEASURE _Measures[Trk YTD Sep-26] =
+    VAR _n = [Trk Line]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = _n, Dim_Period[PeriodKey] = "A2026S" ) )
+MEASURE _Measures[Trk Projected Dec-26] =
+    VAR _n = [Trk Line]
+    RETURN IF ( SELECTEDVALUE ( Dim_Unit[Level], 9 ) <= 1, CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = _n, Dim_Period[PeriodKey] = "P2026" ) )
+MEASURE _Measures[Trk YTD Progress %] =
+    IF ( [Trk Budget 2026] > 0, DIVIDE ( [Trk YTD Sep-26], [Trk Budget 2026] ) )
+MEASURE _Measures[Trk Projected vs Budget %] =
+    IF ( [Trk Budget 2026] > 0, DIVIDE ( [Trk Projected Dec-26], [Trk Budget 2026] ) )
+MEASURE _Measures[Trk Q4 Needed] =
+    IF ( NOT ISBLANK ( [Trk Budget 2026] ), [Trk Budget 2026] - [Trk YTD Sep-26] )
+MEASURE _Measures[Trk Avg Quarter So Far] =
+    DIVIDE ( [Trk YTD Sep-26], 3 )
+MEASURE _Measures[Trk Status] =
+    VAR _b = [Trk Budget 2026]
+    VAR _p = [Trk Projected Dec-26]
+    VAR _r = DIVIDE ( _p, _b )
+    RETURN
+        SWITCH (
+            TRUE (),
+            ISBLANK ( _b ) || ISBLANK ( _p ), BLANK (),
+            [Trk HIB] = 0, IF ( _p <= _b * 1.005, "✓ Within budget", IF ( _p <= _b * 1.05, "! Watch", "✕ Over budget" ) ),
+            _b <= 0, IF ( _p >= _b, "✓ Better than budget", "✕ Worse than budget" ),
+            _r >= 0.995, "✓ On track",
+            _r >= 0.9, "! Watch",
+            "✕ Behind"
+        )
+MEASURE _Measures[Trk Status Colour] =
+    SWITCH ( LEFT ( [Trk Status], 1 ), "✓", "#067647", "!", "#9A6700", "✕", "#B42318", "#6B7586" )
+MEASURE _Measures[Headline] =
+    VAR _b = [PBT B27]
+    VAR _c = [PBT Cmp]
+    VAR _p = DIVIDE ( _b - _c, ABS ( _c ) )
+    VAR _u = IF ( [Divisor] = 1000, " Bn", " Mn" )
+    VAR _ci0 = [Cost to Income Cmp]
+    VAR _ci1 = [Cost to Income B27]
+    RETURN
+        [Selected Unit Name] & ":  Budget 2027 Profit before Tax PKR " & FORMAT ( _b, "#,0.0" ) & _u & ", "
+            & IF ( _p >= 0, "up ", "down " ) & FORMAT ( ABS ( _p ), "0.0%" ) & " vs " & [Compare Label]
+            & IF ( NOT ISBLANK ( _ci1 ), ".  Cost to income " & FORMAT ( _ci0, "0.0%" ) & " to " & FORMAT ( _ci1, "0.0%" ), "" ) & "."
+MEASURE _Measures[Page Subtitle] =
+    [Selected Unit Name] & "  ·  Budget 2027 vs " & [Compare Label] & "  ·  " & [Unit Label]
+MEASURE _Measures[Spark A PBT] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 28 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] <= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark F PBT] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 28 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] >= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark A Total Income] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 16 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] <= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark F Total Income] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 16 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] >= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark A NII] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 8 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] <= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark F NII] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 8 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] >= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark A Admin Exp] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 23 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] <= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark F Admin Exp] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 23 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] >= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark A Advances] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 31 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] <= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark F Advances] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 31 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] >= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark A Deposits] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 33 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] <= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark F Deposits] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 33 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] >= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark A Investments] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 35 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] <= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark F Investments] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 35 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] >= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark A Borrowings] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 37 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] <= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[Spark F Borrowings] =
+    VAR _t =
+        ADDCOLUMNS (
+            FILTER ( ALL ( Dim_Period[PeriodKey], Dim_Period[SortOrder] ), NOT Dim_Period[PeriodKey] IN { "A2026S", "B2026" } ),
+            "@v", CALCULATE ( [Amount], Dim_Line[LineNo] = 37 ),
+            "@x", SWITCH ( Dim_Period[SortOrder], 7, 5, 9, 6, Dim_Period[SortOrder] - 1 )
+        )
+    VAR _n = FILTER ( _t, NOT ISBLANK ( [@v] ) )
+    VAR _mn = MINX ( _n, [@v] )
+    VAR _mx = MAXX ( _n, [@v] )
+    VAR _r = IF ( _mx = _mn, 1, _mx - _mn )
+    RETURN
+        CONCATENATEX ( FILTER ( _n, [@x] >= 4 ), FORMAT ( [@x] * 20, "0" ) & "," & FORMAT ( 27 - ( [@v] - _mn ) / _r * 24, "0.0" ), " ", [@x], ASC )
+MEASURE _Measures[HTML Card PBT] =
+    VAR _b =
+        [PBT B27]
+    VAR _c =
+        [PBT Cmp]
+    VAR _d =
+        IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c )
+    VAR _p =
+        DIVIDE ( _d, ABS ( _c ) )
+    VAR _col =
+        [PBT Colour]
+    VAR _bg =
+        SWITCH ( _col, "#067647", "#E7F6EE", "#B42318", "#FDECEA", "#F1F3F7" )
+    VAR _arr =
+        IF ( _d > 0, "▲", IF ( _d < 0, "▼", "" ) )
+    VAR _ytd =
+        CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 28 )
+    VAR _b26 =
+        CALCULATE ( [Budget 2026], Dim_Line[LineNo] = 28 )
+    VAR _p26 =
+        CALCULATE ( [Projected Dec-26], Dim_Line[LineNo] = 28 )
+    VAR _prog =
+        IF ( _b26 > 0, DIVIDE ( _ytd, _b26 ) )
+    VAR _uc =
+        [Selected Unit Code]
+    VAR _note =
+        CALCULATE ( MAX ( Fact_Commentary[Note] ), Fact_Commentary[UnitCode] = _uc, Fact_Commentary[LineNo] = 28 )
+    VAR _dN =
+        CALCULATE ( [Budget 2027] - [Compare Value], Dim_Line[LineNo] = 8 )
+    VAR _dO =
+        CALCULATE ( [Budget 2027] - [Compare Value], Dim_Line[LineNo] = 15 )
+    VAR _dA =
+        -CALCULATE ( [Budget 2027] - [Compare Value], Dim_Line[LineNo] = 23 )
+    VAR _dP =
+        CALCULATE ( [Budget 2027] - [Compare Value], Dim_Line[LineNo] = 26 )
+    VAR _mxd =
+        MAX ( MAX ( ABS ( _dN ), ABS ( _dO ) ), MAX ( ABS ( _dA ), ABS ( _dP ) ) )
+    VAR _drv =
+        SWITCH ( TRUE (), ABS ( _dN ) = _mxd, "net interest income", ABS ( _dO ) = _mxd, "non-interest income", ABS ( _dA ) = _mxd, "admin expenses", "provisions" )
+    VAR _drvV =
+        SWITCH ( TRUE (), ABS ( _dN ) = _mxd, _dN, ABS ( _dO ) = _mxd, _dO, ABS ( _dA ) = _mxd, _dA, _dP )
+    RETURN
+        "<details class='fc'><summary><div class='in'><div class='face front' style='border-top-color:"
+        & _col
+        & "'><div class='kl'>Profit before Tax<span class='ki'>i</span></div><div class='kv'>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "<span class='ku'>"
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</span></div><div class='kd'><span class='pill' style='color:"
+        & _col
+        & ";background:"
+        & _bg
+        & "'>"
+        & _arr
+        & " "
+        & IF ( ISBLANK ( _p ), "n/a", FORMAT ( _p, "+0.0%;-0.0%;0.0%" ) )
+        & "</span><span class='kc'>vs "
+        & [Compare Short]
+        & "</span></div><svg class='sp' viewBox='0 0 120 30' preserveAspectRatio='none'><polyline class='sa' points='"
+        & [Spark A PBT]
+        & "' style='stroke:"
+        & _col
+        & "'/><polyline class='sf' points='"
+        & [Spark F PBT]
+        & "' style='stroke:"
+        & _col
+        & "'/></svg><div class='pb'><span style='width:"
+        & FORMAT ( MIN ( 1, MAX ( 0, _prog ) ) * 100, "0" )
+        & "%'></span><i></i></div><div class='pg'><span>2026 YTD vs budget</span><b>"
+        & IF ( ISBLANK ( _prog ), "–", FORMAT ( _prog, "0%" ) )
+        & "</b></div></div><div class='face back'><div class='bt'>Profit before Tax</div><ul><li><b>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & " "
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</b>, "
+        & IF ( _d >= 0, "up ", "down " )
+        & IF ( ISBLANK ( _p ), "", FORMAT ( ABS ( _p ), "0.0%" ) )
+        & " ("
+        & IF ( ISBLANK ( _d ), "–", FORMAT ( _d, "+#,0.0;-#,0.0;0.0" ) )
+        & ") vs "
+        & [Compare Short]
+        & ".</li><li>Main driver: <b>"
+        & _drv
+        & "</b> ("
+        & IF ( ISBLANK ( _drvV ), "–", FORMAT ( _drvV, "+#,0.0;-#,0.0;0.0" ) )
+        & ").</li><li>2026: "
+        & IF ( ISBLANK ( _prog ), "–", FORMAT ( _prog, "0%" ) )
+        & " done by Sep (pace 75%), lands at "
+        & IF ( ISBLANK ( DIVIDE ( _p26, _b26 ) ), "–", FORMAT ( DIVIDE ( _p26, _b26 ), "0%" ) )
+        & ".</li></ul>"
+        & IF ( ISBLANK ( _note ), "<div class='note empty'>Notes: Commentary sheet</div>", "<div class='note'>" & _note & "</div>" )
+        & "</div></div></summary></details>"
+MEASURE _Measures[HTML Card Total Income] =
+    VAR _b =
+        [Total Income B27]
+    VAR _c =
+        [Total Income Cmp]
+    VAR _d =
+        IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c )
+    VAR _p =
+        DIVIDE ( _d, ABS ( _c ) )
+    VAR _col =
+        [Total Income Colour]
+    VAR _bg =
+        SWITCH ( _col, "#067647", "#E7F6EE", "#B42318", "#FDECEA", "#F1F3F7" )
+    VAR _arr =
+        IF ( _d > 0, "▲", IF ( _d < 0, "▼", "" ) )
+    VAR _ytd =
+        CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 16 )
+    VAR _b26 =
+        CALCULATE ( [Budget 2026], Dim_Line[LineNo] = 16 )
+    VAR _p26 =
+        CALCULATE ( [Projected Dec-26], Dim_Line[LineNo] = 16 )
+    VAR _prog =
+        IF ( _b26 > 0, DIVIDE ( _ytd, _b26 ) )
+    VAR _uc =
+        [Selected Unit Code]
+    VAR _note =
+        CALCULATE ( MAX ( Fact_Commentary[Note] ), Fact_Commentary[UnitCode] = _uc, Fact_Commentary[LineNo] = 16 )
+    RETURN
+        "<details class='fc'><summary><div class='in'><div class='face front' style='border-top-color:"
+        & _col
+        & "'><div class='kl'>Total Income<span class='ki'>i</span></div><div class='kv'>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "<span class='ku'>"
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</span></div><div class='kd'><span class='pill' style='color:"
+        & _col
+        & ";background:"
+        & _bg
+        & "'>"
+        & _arr
+        & " "
+        & IF ( ISBLANK ( _p ), "n/a", FORMAT ( _p, "+0.0%;-0.0%;0.0%" ) )
+        & "</span><span class='kc'>vs "
+        & [Compare Short]
+        & "</span></div><svg class='sp' viewBox='0 0 120 30' preserveAspectRatio='none'><polyline class='sa' points='"
+        & [Spark A Total Income]
+        & "' style='stroke:"
+        & _col
+        & "'/><polyline class='sf' points='"
+        & [Spark F Total Income]
+        & "' style='stroke:"
+        & _col
+        & "'/></svg><div class='pb'><span style='width:"
+        & FORMAT ( MIN ( 1, MAX ( 0, _prog ) ) * 100, "0" )
+        & "%'></span><i></i></div><div class='pg'><span>2026 YTD vs budget</span><b>"
+        & IF ( ISBLANK ( _prog ), "–", FORMAT ( _prog, "0%" ) )
+        & "</b></div></div><div class='face back'><div class='bt'>Total Income</div><ul><li><b>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & " "
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</b>, "
+        & IF ( _d >= 0, "up ", "down " )
+        & IF ( ISBLANK ( _p ), "", FORMAT ( ABS ( _p ), "0.0%" ) )
+        & " ("
+        & IF ( ISBLANK ( _d ), "–", FORMAT ( _d, "+#,0.0;-#,0.0;0.0" ) )
+        & ") vs "
+        & [Compare Short]
+        & ".</li><li>Net interest is <b>"
+        & IF ( ISBLANK ( [NII Share B27] ), "–", FORMAT ( [NII Share B27], "0.0%" ) )
+        & "</b> of income; non-interest "
+        & IF ( ISBLANK ( [Non-II B27] - [Non-II Cmp] ), "–", FORMAT ( [Non-II B27] - [Non-II Cmp], "+#,0.0;-#,0.0;0.0" ) )
+        & ".</li><li>2026: "
+        & IF ( ISBLANK ( _prog ), "–", FORMAT ( _prog, "0%" ) )
+        & " done by Sep (pace 75%), lands at "
+        & IF ( ISBLANK ( DIVIDE ( _p26, _b26 ) ), "–", FORMAT ( DIVIDE ( _p26, _b26 ), "0%" ) )
+        & ".</li></ul>"
+        & IF ( ISBLANK ( _note ), "<div class='note empty'>Notes: Commentary sheet</div>", "<div class='note'>" & _note & "</div>" )
+        & "</div></div></summary></details>"
+MEASURE _Measures[HTML Card NII] =
+    VAR _b =
+        [NII B27]
+    VAR _c =
+        [NII Cmp]
+    VAR _d =
+        IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c )
+    VAR _p =
+        DIVIDE ( _d, ABS ( _c ) )
+    VAR _col =
+        [NII Colour]
+    VAR _bg =
+        SWITCH ( _col, "#067647", "#E7F6EE", "#B42318", "#FDECEA", "#F1F3F7" )
+    VAR _arr =
+        IF ( _d > 0, "▲", IF ( _d < 0, "▼", "" ) )
+    VAR _ytd =
+        CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 8 )
+    VAR _b26 =
+        CALCULATE ( [Budget 2026], Dim_Line[LineNo] = 8 )
+    VAR _p26 =
+        CALCULATE ( [Projected Dec-26], Dim_Line[LineNo] = 8 )
+    VAR _prog =
+        IF ( _b26 > 0, DIVIDE ( _ytd, _b26 ) )
+    VAR _uc =
+        [Selected Unit Code]
+    VAR _note =
+        CALCULATE ( MAX ( Fact_Commentary[Note] ), Fact_Commentary[UnitCode] = _uc, Fact_Commentary[LineNo] = 8 )
+    RETURN
+        "<details class='fc'><summary><div class='in'><div class='face front' style='border-top-color:"
+        & _col
+        & "'><div class='kl'>Net Interest Income<span class='ki'>i</span></div><div class='kv'>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "<span class='ku'>"
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</span></div><div class='kd'><span class='pill' style='color:"
+        & _col
+        & ";background:"
+        & _bg
+        & "'>"
+        & _arr
+        & " "
+        & IF ( ISBLANK ( _p ), "n/a", FORMAT ( _p, "+0.0%;-0.0%;0.0%" ) )
+        & "</span><span class='kc'>vs "
+        & [Compare Short]
+        & "</span></div><svg class='sp' viewBox='0 0 120 30' preserveAspectRatio='none'><polyline class='sa' points='"
+        & [Spark A NII]
+        & "' style='stroke:"
+        & _col
+        & "'/><polyline class='sf' points='"
+        & [Spark F NII]
+        & "' style='stroke:"
+        & _col
+        & "'/></svg><div class='pb'><span style='width:"
+        & FORMAT ( MIN ( 1, MAX ( 0, _prog ) ) * 100, "0" )
+        & "%'></span><i></i></div><div class='pg'><span>2026 YTD vs budget</span><b>"
+        & IF ( ISBLANK ( _prog ), "–", FORMAT ( _prog, "0%" ) )
+        & "</b></div></div><div class='face back'><div class='bt'>Net Interest Income</div><ul><li><b>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & " "
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</b>, "
+        & IF ( _d >= 0, "up ", "down " )
+        & IF ( ISBLANK ( _p ), "", FORMAT ( ABS ( _p ), "0.0%" ) )
+        & " ("
+        & IF ( ISBLANK ( _d ), "–", FORMAT ( _d, "+#,0.0;-#,0.0;0.0" ) )
+        & ") vs "
+        & [Compare Short]
+        & ".</li><li>Advances income "
+        & IF ( ISBLANK ( CALCULATE ( [Budget 2027] - [Compare Value], Dim_Line[LineNo] = 2 ) ), "–", FORMAT ( CALCULATE ( [Budget 2027] - [Compare Value], Dim_Line[LineNo] = 2 ), "+#,0.0;-#,0.0;0.0" ) )
+        & ", cost of funds "
+        & IF ( ISBLANK ( CALCULATE ( [Budget 2027] - [Compare Value], Dim_Line[LineNo] = 7 ) ), "–", FORMAT ( CALCULATE ( [Budget 2027] - [Compare Value], Dim_Line[LineNo] = 7 ), "+#,0.0;-#,0.0;0.0" ) )
+        & ".</li><li>2026: "
+        & IF ( ISBLANK ( _prog ), "–", FORMAT ( _prog, "0%" ) )
+        & " done by Sep (pace 75%), lands at "
+        & IF ( ISBLANK ( DIVIDE ( _p26, _b26 ) ), "–", FORMAT ( DIVIDE ( _p26, _b26 ), "0%" ) )
+        & ".</li></ul>"
+        & IF ( ISBLANK ( _note ), "<div class='note empty'>Notes: Commentary sheet</div>", "<div class='note'>" & _note & "</div>" )
+        & "</div></div></summary></details>"
+MEASURE _Measures[HTML Card Admin Exp] =
+    VAR _b =
+        [Admin Exp B27]
+    VAR _c =
+        [Admin Exp Cmp]
+    VAR _d =
+        IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c )
+    VAR _p =
+        DIVIDE ( _d, ABS ( _c ) )
+    VAR _col =
+        [Admin Exp Colour]
+    VAR _bg =
+        SWITCH ( _col, "#067647", "#E7F6EE", "#B42318", "#FDECEA", "#F1F3F7" )
+    VAR _arr =
+        IF ( _d > 0, "▲", IF ( _d < 0, "▼", "" ) )
+    VAR _ytd =
+        CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 23 )
+    VAR _b26 =
+        CALCULATE ( [Budget 2026], Dim_Line[LineNo] = 23 )
+    VAR _p26 =
+        CALCULATE ( [Projected Dec-26], Dim_Line[LineNo] = 23 )
+    VAR _prog =
+        IF ( _b26 > 0, DIVIDE ( _ytd, _b26 ) )
+    VAR _uc =
+        [Selected Unit Code]
+    VAR _note =
+        CALCULATE ( MAX ( Fact_Commentary[Note] ), Fact_Commentary[UnitCode] = _uc, Fact_Commentary[LineNo] = 23 )
+    RETURN
+        "<details class='fc'><summary><div class='in'><div class='face front' style='border-top-color:"
+        & _col
+        & "'><div class='kl'>Admin Expenses<span class='ki'>i</span></div><div class='kv'>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "<span class='ku'>"
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</span></div><div class='kd'><span class='pill' style='color:"
+        & _col
+        & ";background:"
+        & _bg
+        & "'>"
+        & _arr
+        & " "
+        & IF ( ISBLANK ( _p ), "n/a", FORMAT ( _p, "+0.0%;-0.0%;0.0%" ) )
+        & "</span><span class='kc'>vs "
+        & [Compare Short]
+        & "</span></div><svg class='sp' viewBox='0 0 120 30' preserveAspectRatio='none'><polyline class='sa' points='"
+        & [Spark A Admin Exp]
+        & "' style='stroke:"
+        & _col
+        & "'/><polyline class='sf' points='"
+        & [Spark F Admin Exp]
+        & "' style='stroke:"
+        & _col
+        & "'/></svg><div class='pb'><span style='width:"
+        & FORMAT ( MIN ( 1, MAX ( 0, _prog ) ) * 100, "0" )
+        & "%'></span><i></i></div><div class='pg'><span>2026 YTD vs budget</span><b>"
+        & IF ( ISBLANK ( _prog ), "–", FORMAT ( _prog, "0%" ) )
+        & "</b></div></div><div class='face back'><div class='bt'>Admin Expenses</div><ul><li><b>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & " "
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</b>, "
+        & IF ( _d >= 0, "up ", "down " )
+        & IF ( ISBLANK ( _p ), "", FORMAT ( ABS ( _p ), "0.0%" ) )
+        & " ("
+        & IF ( ISBLANK ( _d ), "–", FORMAT ( _d, "+#,0.0;-#,0.0;0.0" ) )
+        & ") vs "
+        & [Compare Short]
+        & ".</li><li>Staff "
+        & FORMAT ( DIVIDE ( [Staff Cost B27] - [Staff Cost Cmp], [Staff Cost Cmp] ), "+0.0%;-0.0%" )
+        & ", cost to income "
+        & IF ( ISBLANK ( [Cost to Income Cmp] ), "–", FORMAT ( [Cost to Income Cmp], "0.0%" ) )
+        & " to <b>"
+        & IF ( ISBLANK ( [Cost to Income B27] ), "–", FORMAT ( [Cost to Income B27], "0.0%" ) )
+        & "</b>.</li><li>2026: "
+        & IF ( ISBLANK ( _prog ), "–", FORMAT ( _prog, "0%" ) )
+        & " done by Sep (pace 75%), lands at "
+        & IF ( ISBLANK ( DIVIDE ( _p26, _b26 ) ), "–", FORMAT ( DIVIDE ( _p26, _b26 ), "0%" ) )
+        & ".</li></ul>"
+        & IF ( ISBLANK ( _note ), "<div class='note empty'>Notes: Commentary sheet</div>", "<div class='note'>" & _note & "</div>" )
+        & "</div></div></summary></details>"
+MEASURE _Measures[HTML Card Advances] =
+    VAR _b =
+        [Advances B27]
+    VAR _c =
+        [Advances Cmp]
+    VAR _d =
+        IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c )
+    VAR _p =
+        DIVIDE ( _d, ABS ( _c ) )
+    VAR _col =
+        [Advances Colour]
+    VAR _bg =
+        SWITCH ( _col, "#067647", "#E7F6EE", "#B42318", "#FDECEA", "#F1F3F7" )
+    VAR _arr =
+        IF ( _d > 0, "▲", IF ( _d < 0, "▼", "" ) )
+    VAR _ytd =
+        CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 31 )
+    VAR _b26 =
+        CALCULATE ( [Budget 2026], Dim_Line[LineNo] = 31 )
+    VAR _p26 =
+        CALCULATE ( [Projected Dec-26], Dim_Line[LineNo] = 31 )
+    VAR _prog =
+        IF ( _b26 > 0, DIVIDE ( _ytd, _b26 ) )
+    VAR _uc =
+        [Selected Unit Code]
+    VAR _note =
+        CALCULATE ( MAX ( Fact_Commentary[Note] ), Fact_Commentary[UnitCode] = _uc, Fact_Commentary[LineNo] = 31 )
+    RETURN
+        "<details class='fc'><summary><div class='in'><div class='face front' style='border-top-color:"
+        & _col
+        & "'><div class='kl'>Gross Advances<span class='ki'>i</span></div><div class='kv'>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "<span class='ku'>"
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</span></div><div class='kd'><span class='pill' style='color:"
+        & _col
+        & ";background:"
+        & _bg
+        & "'>"
+        & _arr
+        & " "
+        & IF ( ISBLANK ( _p ), "n/a", FORMAT ( _p, "+0.0%;-0.0%;0.0%" ) )
+        & "</span><span class='kc'>vs "
+        & [Compare Short]
+        & "</span></div><svg class='sp' viewBox='0 0 120 30' preserveAspectRatio='none'><polyline class='sa' points='"
+        & [Spark A Advances]
+        & "' style='stroke:"
+        & _col
+        & "'/><polyline class='sf' points='"
+        & [Spark F Advances]
+        & "' style='stroke:"
+        & _col
+        & "'/></svg><div class='pg sep'><span>Sep-26 balance</span><b>"
+        & IF ( ISBLANK ( _ytd ), "–", FORMAT ( _ytd, "#,0.0" ) )
+        & "</b></div></div><div class='face back'><div class='bt'>Gross Advances</div><ul><li><b>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & " "
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</b>, "
+        & IF ( _d >= 0, "up ", "down " )
+        & IF ( ISBLANK ( _p ), "", FORMAT ( ABS ( _p ), "0.0%" ) )
+        & " ("
+        & IF ( ISBLANK ( _d ), "–", FORMAT ( _d, "+#,0.0;-#,0.0;0.0" ) )
+        & ") vs "
+        & [Compare Short]
+        & ".</li><li>Advances to deposits <b>"
+        & IF ( ISBLANK ( [ADR B27] ), "–", FORMAT ( [ADR B27], "0.0%" ) )
+        & "</b>, was "
+        & IF ( ISBLANK ( [ADR Cmp] ), "–", FORMAT ( [ADR Cmp], "0.0%" ) )
+        & ".</li><li>Sep-26 "
+        & IF ( ISBLANK ( _ytd ), "–", FORMAT ( _ytd, "#,0.0" ) )
+        & ", Budget 2026 "
+        & IF ( ISBLANK ( _b26 ), "–", FORMAT ( _b26, "#,0.0" ) )
+        & ".</li></ul>"
+        & IF ( ISBLANK ( _note ), "<div class='note empty'>Notes: Commentary sheet</div>", "<div class='note'>" & _note & "</div>" )
+        & "</div></div></summary></details>"
+MEASURE _Measures[HTML Card Deposits] =
+    VAR _b =
+        [Deposits B27]
+    VAR _c =
+        [Deposits Cmp]
+    VAR _d =
+        IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c )
+    VAR _p =
+        DIVIDE ( _d, ABS ( _c ) )
+    VAR _col =
+        [Deposits Colour]
+    VAR _bg =
+        SWITCH ( _col, "#067647", "#E7F6EE", "#B42318", "#FDECEA", "#F1F3F7" )
+    VAR _arr =
+        IF ( _d > 0, "▲", IF ( _d < 0, "▼", "" ) )
+    VAR _ytd =
+        CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 33 )
+    VAR _b26 =
+        CALCULATE ( [Budget 2026], Dim_Line[LineNo] = 33 )
+    VAR _p26 =
+        CALCULATE ( [Projected Dec-26], Dim_Line[LineNo] = 33 )
+    VAR _prog =
+        IF ( _b26 > 0, DIVIDE ( _ytd, _b26 ) )
+    VAR _uc =
+        [Selected Unit Code]
+    VAR _note =
+        CALCULATE ( MAX ( Fact_Commentary[Note] ), Fact_Commentary[UnitCode] = _uc, Fact_Commentary[LineNo] = 33 )
+    RETURN
+        "<details class='fc'><summary><div class='in'><div class='face front' style='border-top-color:"
+        & _col
+        & "'><div class='kl'>Deposits<span class='ki'>i</span></div><div class='kv'>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "<span class='ku'>"
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</span></div><div class='kd'><span class='pill' style='color:"
+        & _col
+        & ";background:"
+        & _bg
+        & "'>"
+        & _arr
+        & " "
+        & IF ( ISBLANK ( _p ), "n/a", FORMAT ( _p, "+0.0%;-0.0%;0.0%" ) )
+        & "</span><span class='kc'>vs "
+        & [Compare Short]
+        & "</span></div><svg class='sp' viewBox='0 0 120 30' preserveAspectRatio='none'><polyline class='sa' points='"
+        & [Spark A Deposits]
+        & "' style='stroke:"
+        & _col
+        & "'/><polyline class='sf' points='"
+        & [Spark F Deposits]
+        & "' style='stroke:"
+        & _col
+        & "'/></svg><div class='pg sep'><span>Sep-26 balance</span><b>"
+        & IF ( ISBLANK ( _ytd ), "–", FORMAT ( _ytd, "#,0.0" ) )
+        & "</b></div></div><div class='face back'><div class='bt'>Deposits</div><ul><li><b>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & " "
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</b>, "
+        & IF ( _d >= 0, "up ", "down " )
+        & IF ( ISBLANK ( _p ), "", FORMAT ( ABS ( _p ), "0.0%" ) )
+        & " ("
+        & IF ( ISBLANK ( _d ), "–", FORMAT ( _d, "+#,0.0;-#,0.0;0.0" ) )
+        & ") vs "
+        & [Compare Short]
+        & ".</li><li>Zero-cost current share <b>"
+        & IF ( ISBLANK ( [Current Deposits Share B27] ), "–", FORMAT ( [Current Deposits Share B27], "0.0%" ) )
+        & "</b>.</li><li>Sep-26 "
+        & IF ( ISBLANK ( _ytd ), "–", FORMAT ( _ytd, "#,0.0" ) )
+        & ", Budget 2026 "
+        & IF ( ISBLANK ( _b26 ), "–", FORMAT ( _b26, "#,0.0" ) )
+        & ".</li></ul>"
+        & IF ( ISBLANK ( _note ), "<div class='note empty'>Notes: Commentary sheet</div>", "<div class='note'>" & _note & "</div>" )
+        & "</div></div></summary></details>"
+MEASURE _Measures[HTML Card Investments] =
+    VAR _b =
+        [Investments B27]
+    VAR _c =
+        [Investments Cmp]
+    VAR _d =
+        IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c )
+    VAR _p =
+        DIVIDE ( _d, ABS ( _c ) )
+    VAR _col =
+        [Investments Colour]
+    VAR _bg =
+        SWITCH ( _col, "#067647", "#E7F6EE", "#B42318", "#FDECEA", "#F1F3F7" )
+    VAR _arr =
+        IF ( _d > 0, "▲", IF ( _d < 0, "▼", "" ) )
+    VAR _ytd =
+        CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 35 )
+    VAR _b26 =
+        CALCULATE ( [Budget 2026], Dim_Line[LineNo] = 35 )
+    VAR _p26 =
+        CALCULATE ( [Projected Dec-26], Dim_Line[LineNo] = 35 )
+    VAR _prog =
+        IF ( _b26 > 0, DIVIDE ( _ytd, _b26 ) )
+    VAR _uc =
+        [Selected Unit Code]
+    VAR _note =
+        CALCULATE ( MAX ( Fact_Commentary[Note] ), Fact_Commentary[UnitCode] = _uc, Fact_Commentary[LineNo] = 35 )
+    RETURN
+        "<details class='fc'><summary><div class='in'><div class='face front' style='border-top-color:"
+        & _col
+        & "'><div class='kl'>Investments<span class='ki'>i</span></div><div class='kv'>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "<span class='ku'>"
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</span></div><div class='kd'><span class='pill' style='color:"
+        & _col
+        & ";background:"
+        & _bg
+        & "'>"
+        & _arr
+        & " "
+        & IF ( ISBLANK ( _p ), "n/a", FORMAT ( _p, "+0.0%;-0.0%;0.0%" ) )
+        & "</span><span class='kc'>vs "
+        & [Compare Short]
+        & "</span></div><svg class='sp' viewBox='0 0 120 30' preserveAspectRatio='none'><polyline class='sa' points='"
+        & [Spark A Investments]
+        & "' style='stroke:"
+        & _col
+        & "'/><polyline class='sf' points='"
+        & [Spark F Investments]
+        & "' style='stroke:"
+        & _col
+        & "'/></svg><div class='pg sep'><span>Sep-26 balance</span><b>"
+        & IF ( ISBLANK ( _ytd ), "–", FORMAT ( _ytd, "#,0.0" ) )
+        & "</b></div></div><div class='face back'><div class='bt'>Investments</div><ul><li><b>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & " "
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</b>, "
+        & IF ( _d >= 0, "up ", "down " )
+        & IF ( ISBLANK ( _p ), "", FORMAT ( ABS ( _p ), "0.0%" ) )
+        & " ("
+        & IF ( ISBLANK ( _d ), "–", FORMAT ( _d, "+#,0.0;-#,0.0;0.0" ) )
+        & ") vs "
+        & [Compare Short]
+        & ".</li><li>Sep-26 "
+        & IF ( ISBLANK ( _ytd ), "–", FORMAT ( _ytd, "#,0.0" ) )
+        & ", Budget 2026 "
+        & IF ( ISBLANK ( _b26 ), "–", FORMAT ( _b26, "#,0.0" ) )
+        & ".</li></ul>"
+        & IF ( ISBLANK ( _note ), "<div class='note empty'>Notes: Commentary sheet</div>", "<div class='note'>" & _note & "</div>" )
+        & "</div></div></summary></details>"
+MEASURE _Measures[HTML Card Borrowings] =
+    VAR _b =
+        [Borrowings B27]
+    VAR _c =
+        [Borrowings Cmp]
+    VAR _d =
+        IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c )
+    VAR _p =
+        DIVIDE ( _d, ABS ( _c ) )
+    VAR _col =
+        [Borrowings Colour]
+    VAR _bg =
+        SWITCH ( _col, "#067647", "#E7F6EE", "#B42318", "#FDECEA", "#F1F3F7" )
+    VAR _arr =
+        IF ( _d > 0, "▲", IF ( _d < 0, "▼", "" ) )
+    VAR _ytd =
+        CALCULATE ( [YTD Sep-26], Dim_Line[LineNo] = 37 )
+    VAR _b26 =
+        CALCULATE ( [Budget 2026], Dim_Line[LineNo] = 37 )
+    VAR _p26 =
+        CALCULATE ( [Projected Dec-26], Dim_Line[LineNo] = 37 )
+    VAR _prog =
+        IF ( _b26 > 0, DIVIDE ( _ytd, _b26 ) )
+    VAR _uc =
+        [Selected Unit Code]
+    VAR _note =
+        CALCULATE ( MAX ( Fact_Commentary[Note] ), Fact_Commentary[UnitCode] = _uc, Fact_Commentary[LineNo] = 37 )
+    RETURN
+        "<details class='fc'><summary><div class='in'><div class='face front' style='border-top-color:"
+        & _col
+        & "'><div class='kl'>Borrowings<span class='ki'>i</span></div><div class='kv'>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "<span class='ku'>"
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</span></div><div class='kd'><span class='pill' style='color:"
+        & _col
+        & ";background:"
+        & _bg
+        & "'>"
+        & _arr
+        & " "
+        & IF ( ISBLANK ( _p ), "n/a", FORMAT ( _p, "+0.0%;-0.0%;0.0%" ) )
+        & "</span><span class='kc'>vs "
+        & [Compare Short]
+        & "</span></div><svg class='sp' viewBox='0 0 120 30' preserveAspectRatio='none'><polyline class='sa' points='"
+        & [Spark A Borrowings]
+        & "' style='stroke:"
+        & _col
+        & "'/><polyline class='sf' points='"
+        & [Spark F Borrowings]
+        & "' style='stroke:"
+        & _col
+        & "'/></svg><div class='pg sep'><span>Sep-26 balance</span><b>"
+        & IF ( ISBLANK ( _ytd ), "–", FORMAT ( _ytd, "#,0.0" ) )
+        & "</b></div></div><div class='face back'><div class='bt'>Borrowings</div><ul><li><b>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & " "
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</b>, "
+        & IF ( _d >= 0, "up ", "down " )
+        & IF ( ISBLANK ( _p ), "", FORMAT ( ABS ( _p ), "0.0%" ) )
+        & " ("
+        & IF ( ISBLANK ( _d ), "–", FORMAT ( _d, "+#,0.0;-#,0.0;0.0" ) )
+        & ") vs "
+        & [Compare Short]
+        & ".</li><li>Sep-26 "
+        & IF ( ISBLANK ( _ytd ), "–", FORMAT ( _ytd, "#,0.0" ) )
+        & ", Budget 2026 "
+        & IF ( ISBLANK ( _b26 ), "–", FORMAT ( _b26, "#,0.0" ) )
+        & ".</li></ul>"
+        & IF ( ISBLANK ( _note ), "<div class='note empty'>Notes: Commentary sheet</div>", "<div class='note'>" & _note & "</div>" )
+        & "</div></div></summary></details>"
+MEASURE _Measures[HTML KPI Strip] =
+    "<div class='kpis'>" & [HTML Card PBT] & [HTML Card Total Income] & [HTML Card NII] & [HTML Card Admin Exp] & [HTML Card Advances] & [HTML Card Deposits] & "</div>"
+MEASURE _Measures[HTML KPI Strip BS] =
+    "<div class='kpis k4'>" & [HTML Card Advances] & [HTML Card Deposits] & [HTML Card Investments] & [HTML Card Borrowings] & "</div>"
+MEASURE _Measures[HTML Nav Item] =
+    VAR _u =
+        SELECTEDVALUE ( 'Unit Selector'[UnitCode] )
+    VAR _lv =
+        SELECTEDVALUE ( 'Unit Selector'[Level] )
+    VAR _k =
+        [Compare Key]
+    VAR _b =
+        CALCULATE ( [Amount (Axis)], Dim_Unit[UnitCode] = _u, Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "B2027" )
+    VAR _c =
+        CALCULATE ( [Amount (Axis)], Dim_Unit[UnitCode] = _u, Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = _k )
+    VAR _bank =
+        CALCULATE ( [Amount (Axis)], Dim_Unit[UnitCode] = "BANK", Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "B2027" )
+    VAR _sh =
+        MIN ( 1, MAX ( 0, DIVIDE ( _b, _bank ) ) )
+    VAR _up =
+        _b >= _c
+    RETURN
+        IF ( _lv <= 1,
+        "<div class='nv lv"
+        & _lv
+        & "'><div class='nt'><b>"
+        & SELECTEDVALUE ( 'Unit Selector'[Unit] )
+        & "</b><span class='nvv'>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "<i style='color:"
+        & IF ( _up, "#2FB37E", "#E5675C" )
+        & "'>"
+        & IF ( ISBLANK ( _c ) || ISBLANK ( _b ), "", IF ( _up, "▲", "▼" ) )
+        & "</i></span></div><div class='nn'>"
+        & SELECTEDVALUE ( 'Unit Selector'[UnitName] )
+        & "</div><div class='nb'><span style='width:"
+        & FORMAT ( _sh * 100, "0" )
+        & "%'></span></div></div>"
+        )
+MEASURE _Measures[HTML Headline] =
+    VAR _b =
+        [PBT B27]
+    VAR _c =
+        [PBT Cmp]
+    VAR _p =
+        IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+    RETURN
+        "<div class='hl'><div class='hk'><b>"
+        & [Selected Unit Name]
+        & "</b><span>Budget 2027 vs "
+        & [Compare Label]
+        & " · PKR "
+        & IF ( [Divisor] = 1000, "Bn", "Mn" )
+        & "</span></div><div class='hs'>Profit before tax <b>"
+        & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) )
+        & "</b> <span class='pill "
+        & IF ( _b >= _c, "g", "r" )
+        & "'>"
+        & IF ( ISBLANK ( _p ), "n/a", IF ( _b >= _c, "▲ ", "▼ " ) & FORMAT ( _p, "+0.0%;-0.0%" ) )
+        & "</span><em>|</em>Cost to income <b>"
+        & IF ( ISBLANK ( [Cost to Income Cmp] ), "–", FORMAT ( [Cost to Income Cmp], "0.0%" ) )
+        & " to "
+        & IF ( ISBLANK ( [Cost to Income B27] ), "–", FORMAT ( [Cost to Income B27], "0.0%" ) )
+        & "</b><em>|</em>Advances to deposits <b>"
+        & IF ( ISBLANK ( [ADR B27] ), "–", FORMAT ( [ADR B27], "0.0%" ) )
+        & "</b></div></div>"
+MEASURE _Measures[HTML Rings] =
+    "<div class='rings'><div class='rg'><svg viewBox='0 0 68 68'><circle cx='34' cy='34' r='26' class='rt'/><circle cx='34' cy='34' r='26' class='rv' stroke-dasharray='"
+        & FORMAT ( MIN ( 1, MAX ( 0, DIVIDE ( [Cost to Income B27], 1 ) ) ) * 163.36, "0.0" )
+        & " 163.36' transform='rotate(-90 34 34)'/><line x1='34' y1='3' x2='34' y2='15' class='rk' transform='rotate("
+        & FORMAT ( MIN ( 1, MAX ( 0, DIVIDE ( [Cost to Income Cmp], 1 ) ) ) * 360, "0" )
+        & " 34 34)'/><text x='34' y='38' class='rx'>"
+        & IF ( ISBLANK ( [Cost to Income B27] ), "–", FORMAT ( [Cost to Income B27], "0%" ) )
+        & "</text></svg><div class='rn'>Cost to income</div><div class='rd' style='color:"
+        & IF ( ( [Cost to Income B27] - [Cost to Income Cmp] > 0 ) = ( -1 = 1 ), "#067647", "#B42318" )
+        & "'>"
+        & IF ( ISBLANK ( [Cost to Income Cmp] ) || ISBLANK ( [Cost to Income B27] ), "", IF ( [Cost to Income B27] >= [Cost to Income Cmp], "▲ ", "▼ " ) & FORMAT ( ( [Cost to Income B27] - [Cost to Income Cmp] ) * 100, "+0.0;-0.0" ) & " pp" )
+        & "</div></div><div class='rg'><svg viewBox='0 0 68 68'><circle cx='34' cy='34' r='26' class='rt'/><circle cx='34' cy='34' r='26' class='rv' stroke-dasharray='"
+        & FORMAT ( MIN ( 1, MAX ( 0, DIVIDE ( [NII Share B27], 1 ) ) ) * 163.36, "0.0" )
+        & " 163.36' transform='rotate(-90 34 34)'/><line x1='34' y1='3' x2='34' y2='15' class='rk' transform='rotate("
+        & FORMAT ( MIN ( 1, MAX ( 0, DIVIDE ( [NII Share Cmp], 1 ) ) ) * 360, "0" )
+        & " 34 34)'/><text x='34' y='38' class='rx'>"
+        & IF ( ISBLANK ( [NII Share B27] ), "–", FORMAT ( [NII Share B27], "0%" ) )
+        & "</text></svg><div class='rn'>Net interest share</div><div class='rd' style='color:"
+        & IF ( ( [NII Share B27] - [NII Share Cmp] > 0 ) = ( 1 = 1 ), "#067647", "#B42318" )
+        & "'>"
+        & IF ( ISBLANK ( [NII Share Cmp] ) || ISBLANK ( [NII Share B27] ), "", IF ( [NII Share B27] >= [NII Share Cmp], "▲ ", "▼ " ) & FORMAT ( ( [NII Share B27] - [NII Share Cmp] ) * 100, "+0.0;-0.0" ) & " pp" )
+        & "</div></div><div class='rg'><svg viewBox='0 0 68 68'><circle cx='34' cy='34' r='26' class='rt'/><circle cx='34' cy='34' r='26' class='rv' stroke-dasharray='"
+        & FORMAT ( MIN ( 1, MAX ( 0, DIVIDE ( [Profit Margin B27], 1 ) ) ) * 163.36, "0.0" )
+        & " 163.36' transform='rotate(-90 34 34)'/><line x1='34' y1='3' x2='34' y2='15' class='rk' transform='rotate("
+        & FORMAT ( MIN ( 1, MAX ( 0, DIVIDE ( [Profit Margin Cmp], 1 ) ) ) * 360, "0" )
+        & " 34 34)'/><text x='34' y='38' class='rx'>"
+        & IF ( ISBLANK ( [Profit Margin B27] ), "–", FORMAT ( [Profit Margin B27], "0%" ) )
+        & "</text></svg><div class='rn'>Profit margin</div><div class='rd' style='color:"
+        & IF ( ( [Profit Margin B27] - [Profit Margin Cmp] > 0 ) = ( 1 = 1 ), "#067647", "#B42318" )
+        & "'>"
+        & IF ( ISBLANK ( [Profit Margin Cmp] ) || ISBLANK ( [Profit Margin B27] ), "", IF ( [Profit Margin B27] >= [Profit Margin Cmp], "▲ ", "▼ " ) & FORMAT ( ( [Profit Margin B27] - [Profit Margin Cmp] ) * 100, "+0.0;-0.0" ) & " pp" )
+        & "</div></div><div class='rg'><svg viewBox='0 0 68 68'><circle cx='34' cy='34' r='26' class='rt'/><circle cx='34' cy='34' r='26' class='rv' stroke-dasharray='"
+        & FORMAT ( MIN ( 1, MAX ( 0, DIVIDE ( [ADR B27], 1.5 ) ) ) * 163.36, "0.0" )
+        & " 163.36' transform='rotate(-90 34 34)'/><line x1='34' y1='3' x2='34' y2='15' class='rk' transform='rotate("
+        & FORMAT ( MIN ( 1, MAX ( 0, DIVIDE ( [ADR Cmp], 1.5 ) ) ) * 360, "0" )
+        & " 34 34)'/><text x='34' y='38' class='rx'>"
+        & IF ( ISBLANK ( [ADR B27] ), "–", FORMAT ( [ADR B27], "0%" ) )
+        & "</text></svg><div class='rn'>Advances / deposits</div><div class='rd' style='color:"
+        & "#6B7586"
+        & "'>"
+        & IF ( ISBLANK ( [ADR Cmp] ) || ISBLANK ( [ADR B27] ), "", IF ( [ADR B27] >= [ADR Cmp], "▲ ", "▼ " ) & FORMAT ( ( [ADR B27] - [ADR Cmp] ) * 100, "+0.0;-0.0" ) & " pp" )
+        & "</div></div></div>"
+MEASURE _Measures[HTML Heatmap] =
+    VAR _k = [Compare Key]
+    VAR _sel = [Selected Unit Code]
+    RETURN
+        "<table class='hm'><thead><tr><th>Unit</th><th>Income</th><th>NII</th><th>Non-int</th><th>Admin</th><th>PBT</th><th>Advances</th><th>Deposits</th></tr></thead><tbody>"
+        & CONCATENATEX (
+            FILTER ( ALL ( Dim_Unit ), Dim_Unit[Level] <= 1 ),
+            "<tr class='" & IF ( Dim_Unit[UnitCode] = _sel, "sel", "" ) & "'><td>" & Dim_Unit[ShortName] & "</td>" & ( VAR _hb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 16, Dim_Period[PeriodKey] = "B2027" )
+            VAR _hc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 16, Dim_Period[PeriodKey] = _k )
+            VAR _hp = IF ( NOT ISBLANK ( _hb ) && NOT ISBLANK ( _hc ), DIVIDE ( _hb - _hc, ABS ( _hc ) ) )
+            VAR _hg = ( _hp > 0 ) = ( 1 = 1 )
+            VAR _cls = SWITCH ( TRUE (), ISBLANK ( _hp ) || _hp = 0, "h0", _hg && ABS ( _hp ) >= 0.25, "g3", _hg && ABS ( _hp ) >= 0.08, "g2", _hg, "g1", ABS ( _hp ) >= 0.25, "r3", ABS ( _hp ) >= 0.08, "r2", "r1" )
+            RETURN "<td class='" & _cls & "' title='B27 " & FORMAT ( _hb, "#,0.0" ) & " | was " & FORMAT ( _hc, "#,0.0" ) & "'>"
+                & IF ( ISBLANK ( _hp ), "–", IF ( _hp > 0, "▲ ", "▼ " ) & IF ( ABS ( _hp ) >= 10, ">999%", FORMAT ( ABS ( _hp ), "0.0%" ) ) ) & "</td>" ) & ( VAR _hb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 8, Dim_Period[PeriodKey] = "B2027" )
+            VAR _hc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 8, Dim_Period[PeriodKey] = _k )
+            VAR _hp = IF ( NOT ISBLANK ( _hb ) && NOT ISBLANK ( _hc ), DIVIDE ( _hb - _hc, ABS ( _hc ) ) )
+            VAR _hg = ( _hp > 0 ) = ( 1 = 1 )
+            VAR _cls = SWITCH ( TRUE (), ISBLANK ( _hp ) || _hp = 0, "h0", _hg && ABS ( _hp ) >= 0.25, "g3", _hg && ABS ( _hp ) >= 0.08, "g2", _hg, "g1", ABS ( _hp ) >= 0.25, "r3", ABS ( _hp ) >= 0.08, "r2", "r1" )
+            RETURN "<td class='" & _cls & "' title='B27 " & FORMAT ( _hb, "#,0.0" ) & " | was " & FORMAT ( _hc, "#,0.0" ) & "'>"
+                & IF ( ISBLANK ( _hp ), "–", IF ( _hp > 0, "▲ ", "▼ " ) & IF ( ABS ( _hp ) >= 10, ">999%", FORMAT ( ABS ( _hp ), "0.0%" ) ) ) & "</td>" ) & ( VAR _hb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 15, Dim_Period[PeriodKey] = "B2027" )
+            VAR _hc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 15, Dim_Period[PeriodKey] = _k )
+            VAR _hp = IF ( NOT ISBLANK ( _hb ) && NOT ISBLANK ( _hc ), DIVIDE ( _hb - _hc, ABS ( _hc ) ) )
+            VAR _hg = ( _hp > 0 ) = ( 1 = 1 )
+            VAR _cls = SWITCH ( TRUE (), ISBLANK ( _hp ) || _hp = 0, "h0", _hg && ABS ( _hp ) >= 0.25, "g3", _hg && ABS ( _hp ) >= 0.08, "g2", _hg, "g1", ABS ( _hp ) >= 0.25, "r3", ABS ( _hp ) >= 0.08, "r2", "r1" )
+            RETURN "<td class='" & _cls & "' title='B27 " & FORMAT ( _hb, "#,0.0" ) & " | was " & FORMAT ( _hc, "#,0.0" ) & "'>"
+                & IF ( ISBLANK ( _hp ), "–", IF ( _hp > 0, "▲ ", "▼ " ) & IF ( ABS ( _hp ) >= 10, ">999%", FORMAT ( ABS ( _hp ), "0.0%" ) ) ) & "</td>" ) & ( VAR _hb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 23, Dim_Period[PeriodKey] = "B2027" )
+            VAR _hc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 23, Dim_Period[PeriodKey] = _k )
+            VAR _hp = IF ( NOT ISBLANK ( _hb ) && NOT ISBLANK ( _hc ), DIVIDE ( _hb - _hc, ABS ( _hc ) ) )
+            VAR _hg = ( _hp > 0 ) = ( 0 = 1 )
+            VAR _cls = SWITCH ( TRUE (), ISBLANK ( _hp ) || _hp = 0, "h0", _hg && ABS ( _hp ) >= 0.25, "g3", _hg && ABS ( _hp ) >= 0.08, "g2", _hg, "g1", ABS ( _hp ) >= 0.25, "r3", ABS ( _hp ) >= 0.08, "r2", "r1" )
+            RETURN "<td class='" & _cls & "' title='B27 " & FORMAT ( _hb, "#,0.0" ) & " | was " & FORMAT ( _hc, "#,0.0" ) & "'>"
+                & IF ( ISBLANK ( _hp ), "–", IF ( _hp > 0, "▲ ", "▼ " ) & IF ( ABS ( _hp ) >= 10, ">999%", FORMAT ( ABS ( _hp ), "0.0%" ) ) ) & "</td>" ) & ( VAR _hb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "B2027" )
+            VAR _hc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = _k )
+            VAR _hp = IF ( NOT ISBLANK ( _hb ) && NOT ISBLANK ( _hc ), DIVIDE ( _hb - _hc, ABS ( _hc ) ) )
+            VAR _hg = ( _hp > 0 ) = ( 1 = 1 )
+            VAR _cls = SWITCH ( TRUE (), ISBLANK ( _hp ) || _hp = 0, "h0", _hg && ABS ( _hp ) >= 0.25, "g3", _hg && ABS ( _hp ) >= 0.08, "g2", _hg, "g1", ABS ( _hp ) >= 0.25, "r3", ABS ( _hp ) >= 0.08, "r2", "r1" )
+            RETURN "<td class='" & _cls & "' title='B27 " & FORMAT ( _hb, "#,0.0" ) & " | was " & FORMAT ( _hc, "#,0.0" ) & "'>"
+                & IF ( ISBLANK ( _hp ), "–", IF ( _hp > 0, "▲ ", "▼ " ) & IF ( ABS ( _hp ) >= 10, ">999%", FORMAT ( ABS ( _hp ), "0.0%" ) ) ) & "</td>" ) & ( VAR _hb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 31, Dim_Period[PeriodKey] = "B2027" )
+            VAR _hc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 31, Dim_Period[PeriodKey] = _k )
+            VAR _hp = IF ( NOT ISBLANK ( _hb ) && NOT ISBLANK ( _hc ), DIVIDE ( _hb - _hc, ABS ( _hc ) ) )
+            VAR _hg = ( _hp > 0 ) = ( 1 = 1 )
+            VAR _cls = SWITCH ( TRUE (), ISBLANK ( _hp ) || _hp = 0, "h0", _hg && ABS ( _hp ) >= 0.25, "g3", _hg && ABS ( _hp ) >= 0.08, "g2", _hg, "g1", ABS ( _hp ) >= 0.25, "r3", ABS ( _hp ) >= 0.08, "r2", "r1" )
+            RETURN "<td class='" & _cls & "' title='B27 " & FORMAT ( _hb, "#,0.0" ) & " | was " & FORMAT ( _hc, "#,0.0" ) & "'>"
+                & IF ( ISBLANK ( _hp ), "–", IF ( _hp > 0, "▲ ", "▼ " ) & IF ( ABS ( _hp ) >= 10, ">999%", FORMAT ( ABS ( _hp ), "0.0%" ) ) ) & "</td>" ) & ( VAR _hb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 33, Dim_Period[PeriodKey] = "B2027" )
+            VAR _hc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 33, Dim_Period[PeriodKey] = _k )
+            VAR _hp = IF ( NOT ISBLANK ( _hb ) && NOT ISBLANK ( _hc ), DIVIDE ( _hb - _hc, ABS ( _hc ) ) )
+            VAR _hg = ( _hp > 0 ) = ( 1 = 1 )
+            VAR _cls = SWITCH ( TRUE (), ISBLANK ( _hp ) || _hp = 0, "h0", _hg && ABS ( _hp ) >= 0.25, "g3", _hg && ABS ( _hp ) >= 0.08, "g2", _hg, "g1", ABS ( _hp ) >= 0.25, "r3", ABS ( _hp ) >= 0.08, "r2", "r1" )
+            RETURN "<td class='" & _cls & "' title='B27 " & FORMAT ( _hb, "#,0.0" ) & " | was " & FORMAT ( _hc, "#,0.0" ) & "'>"
+                & IF ( ISBLANK ( _hp ), "–", IF ( _hp > 0, "▲ ", "▼ " ) & IF ( ABS ( _hp ) >= 10, ">999%", FORMAT ( ABS ( _hp ), "0.0%" ) ) ) & "</td>" ) & "</tr>",
+            "",
+            Dim_Unit[SortOrder], ASC
+        )
+        & "</tbody></table><div class='hk2'><span class='r3'></span>Worse<span class='r1'></span><span class='g1'></span><span class='g3'></span>Better &nbsp;·&nbsp; darker = bigger change; expenses count as better when they fall</div>"
+MEASURE _Measures[HTML PL Summary] =
+    "<table class='pl'><thead><tr><th>PKR</th><th>Dec-25 A</th><th>Dec-26 P</th><th>2027 B</th><th>Var %</th></tr></thead><tbody>" & CONCATENATEX (
+            FILTER ( ALL ( Dim_Line ), Dim_Line[LineNo] IN { 8, 15, 16, 23, 24, 26, 28, 30 } ),
+            VAR _b = CALCULATE ( [Budget 2027] )
+                VAR _c = CALCULATE ( [Compare Value] )
+                VAR _p = IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+                VAR _g = IF ( ISBLANK ( _p ) || _p = 0, 0, IF ( ( _p > 0 ) = ( Dim_Line[HigherIsBetter] = 1 ), 1, -1 ) )
+                VAR _cls = IF ( Dim_Line[LineNo] IN { 8, 16, 28 }, "key", IF ( Dim_Line[Nature] = "Subtotal" || Dim_Line[Statement] = "Balance Sheet" && Dim_Line[IsKPI] = 1, "sub", "" ) )
+                RETURN "<tr class='" & _cls & "'><td>" & Dim_Line[LineItem] & "</td>" & "<td>" & IF ( ISBLANK ( CALCULATE ( [Actual Dec-25] ) ), "–", FORMAT ( CALCULATE ( [Actual Dec-25] ), "#,0.0" ) ) & "</td>" & "<td>" & IF ( ISBLANK ( CALCULATE ( [Projected Dec-26] ) ), "–", FORMAT ( CALCULATE ( [Projected Dec-26] ), "#,0.0" ) ) & "</td>" & "<td>" & IF ( ISBLANK ( CALCULATE ( [Budget 2027] ) ), "–", FORMAT ( CALCULATE ( [Budget 2027] ), "#,0.0" ) ) & "</td>" & "<td class='" & IF ( _g = 0, "", IF ( _g = 1, "up", "dn" ) ) & "'>" & IF ( ISBLANK ( _p ), "", IF ( _p > 0, "▲ ", "▼ " ) & IF ( ABS ( _p ) >= 10, ">999%", FORMAT ( ABS ( _p ), "0.0%" ) ) ) & "</td>" & "</tr>",
+            "", Dim_Line[SortOrder], ASC ) & "</tbody></table>"
+MEASURE _Measures[HTML PL Full] =
+    "<table class='pl full'><thead><tr><th>PKR</th><th>Dec-24 A</th><th>Dec-25 A</th><th>Sep-26 YTD</th><th>Dec-26 P</th><th>Budget 2026</th><th>Budget 2027</th><th>Var</th><th>Var %</th></tr></thead><tbody>" & CONCATENATEX (
+            ADDCOLUMNS ( SUMMARIZE ( ALL ( Dim_Line ), Dim_Line[Section] ), "@o", CALCULATE ( MIN ( Dim_Line[SortOrder] ) ) ),
+            VAR _sec = Dim_Line[Section]
+            VAR _rows =
+                CONCATENATEX (
+                    FILTER ( ALL ( Dim_Line ), Dim_Line[Section] = _sec && ( NOT ISBLANK ( CALCULATE ( [Budget 2027] ) ) || NOT ISBLANK ( CALCULATE ( [Projected Dec-26] ) ) || NOT ISBLANK ( CALCULATE ( [Actual Dec-25] ) ) ) ),
+                    VAR _b = CALCULATE ( [Budget 2027] )
+                VAR _c = CALCULATE ( [Compare Value] )
+                VAR _p = IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), DIVIDE ( _b - _c, ABS ( _c ) ) )
+                VAR _g = IF ( ISBLANK ( _p ) || _p = 0, 0, IF ( ( _p > 0 ) = ( Dim_Line[HigherIsBetter] = 1 ), 1, -1 ) )
+                VAR _cls = IF ( Dim_Line[LineNo] IN { 8, 16, 28 }, "key", IF ( Dim_Line[Nature] = "Subtotal" || Dim_Line[Statement] = "Balance Sheet" && Dim_Line[IsKPI] = 1, "sub", "" ) )
+                RETURN "<tr class='" & _cls & "'><td>" & Dim_Line[LineItem] & "</td>" & "<td>" & IF ( ISBLANK ( CALCULATE ( [Actual Dec-24] ) ), "–", FORMAT ( CALCULATE ( [Actual Dec-24] ), "#,0.0" ) ) & "</td>" & "<td>" & IF ( ISBLANK ( CALCULATE ( [Actual Dec-25] ) ), "–", FORMAT ( CALCULATE ( [Actual Dec-25] ), "#,0.0" ) ) & "</td>" & "<td>" & IF ( ISBLANK ( CALCULATE ( [YTD Sep-26] ) ), "–", FORMAT ( CALCULATE ( [YTD Sep-26] ), "#,0.0" ) ) & "</td>" & "<td>" & IF ( ISBLANK ( CALCULATE ( [Projected Dec-26] ) ), "–", FORMAT ( CALCULATE ( [Projected Dec-26] ), "#,0.0" ) ) & "</td>" & "<td>" & IF ( ISBLANK ( CALCULATE ( [Budget 2026] ) ), "–", FORMAT ( CALCULATE ( [Budget 2026] ), "#,0.0" ) ) & "</td>" & "<td>" & IF ( ISBLANK ( CALCULATE ( [Budget 2027] ) ), "–", FORMAT ( CALCULATE ( [Budget 2027] ), "#,0.0" ) ) & "</td>" & "<td>" & IF ( ISBLANK ( IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c ) ), "–", FORMAT ( IF ( NOT ISBLANK ( _b ) && NOT ISBLANK ( _c ), _b - _c ), "+#,0.0;-#,0.0;0.0" ) ) & "</td>" & "<td class='" & IF ( _g = 0, "", IF ( _g = 1, "up", "dn" ) ) & "'>" & IF ( ISBLANK ( _p ), "", IF ( _p > 0, "▲ ", "▼ " ) & IF ( ABS ( _p ) >= 10, ">999%", FORMAT ( ABS ( _p ), "0.0%" ) ) ) & "</td>" & "</tr>",
+                    "", Dim_Line[SortOrder], ASC )
+            RETURN IF ( _rows = "", "", "<tr class='sec'><td colspan='9'>" & _sec & "</td></tr>" & _rows ),
+            "", [@o], ASC ) & "</tbody></table>"
+MEASURE _Measures[HTML Scorecard] =
+    VAR _k = [Compare Key]
+    VAR _bankPBT = CALCULATE ( [Amount (Axis)], Dim_Unit[UnitCode] = "BANK", Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "B2027" )
+    RETURN
+        "<table class='sc'><thead><tr><th>Segment</th><th>Income</th><th>NII</th><th>Admin</th><th>PBT</th><th>Advances</th><th>Deposits</th><th>Cost / income</th><th>Share of PBT</th></tr></thead><tbody>"
+        & CONCATENATEX (
+            FILTER ( ALL ( Dim_Unit ), Dim_Unit[Level] <= 1 ),
+            "<tr class='" & IF ( Dim_Unit[Level] = 0, "tot", "" ) & "'><td><b>" & Dim_Unit[ShortName] & "</b><small>" & Dim_Unit[UnitName] & "</small></td>" & ( VAR _sb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 16, Dim_Period[PeriodKey] = "B2027" )
+                VAR _sc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 16, Dim_Period[PeriodKey] = _k )
+                VAR _sp = IF ( NOT ISBLANK ( _sb ) && NOT ISBLANK ( _sc ), DIVIDE ( _sb - _sc, ABS ( _sc ) ) )
+                RETURN "<td>" & IF ( ISBLANK ( _sb ), "–", FORMAT ( _sb, "#,0.0" ) ) & IF ( ISBLANK ( _sp ), "", "<span class='chip " & IF ( ( _sp > 0 ) = ( 1 = 1 ), "up", "dn" ) & "'>" & IF ( _sp > 0, "▲ ", "▼ " ) & IF ( ABS ( _sp ) >= 10, ">999%", FORMAT ( ABS ( _sp ), "0.0%" ) ) & "</span>" ) & "</td>" ) & ( VAR _sb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 8, Dim_Period[PeriodKey] = "B2027" )
+                VAR _sc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 8, Dim_Period[PeriodKey] = _k )
+                VAR _sp = IF ( NOT ISBLANK ( _sb ) && NOT ISBLANK ( _sc ), DIVIDE ( _sb - _sc, ABS ( _sc ) ) )
+                RETURN "<td>" & IF ( ISBLANK ( _sb ), "–", FORMAT ( _sb, "#,0.0" ) ) & "</td>" ) & ( VAR _sb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 23, Dim_Period[PeriodKey] = "B2027" )
+                VAR _sc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 23, Dim_Period[PeriodKey] = _k )
+                VAR _sp = IF ( NOT ISBLANK ( _sb ) && NOT ISBLANK ( _sc ), DIVIDE ( _sb - _sc, ABS ( _sc ) ) )
+                RETURN "<td>" & IF ( ISBLANK ( _sb ), "–", FORMAT ( _sb, "#,0.0" ) ) & IF ( ISBLANK ( _sp ), "", "<span class='chip " & IF ( ( _sp > 0 ) = ( 0 = 1 ), "up", "dn" ) & "'>" & IF ( _sp > 0, "▲ ", "▼ " ) & IF ( ABS ( _sp ) >= 10, ">999%", FORMAT ( ABS ( _sp ), "0.0%" ) ) & "</span>" ) & "</td>" ) & ( VAR _sb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "B2027" )
+                VAR _sc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = _k )
+                VAR _sp = IF ( NOT ISBLANK ( _sb ) && NOT ISBLANK ( _sc ), DIVIDE ( _sb - _sc, ABS ( _sc ) ) )
+                RETURN "<td>" & IF ( ISBLANK ( _sb ), "–", FORMAT ( _sb, "#,0.0" ) ) & IF ( ISBLANK ( _sp ), "", "<span class='chip " & IF ( ( _sp > 0 ) = ( 1 = 1 ), "up", "dn" ) & "'>" & IF ( _sp > 0, "▲ ", "▼ " ) & IF ( ABS ( _sp ) >= 10, ">999%", FORMAT ( ABS ( _sp ), "0.0%" ) ) & "</span>" ) & "</td>" ) & ( VAR _sb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 31, Dim_Period[PeriodKey] = "B2027" )
+                VAR _sc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 31, Dim_Period[PeriodKey] = _k )
+                VAR _sp = IF ( NOT ISBLANK ( _sb ) && NOT ISBLANK ( _sc ), DIVIDE ( _sb - _sc, ABS ( _sc ) ) )
+                RETURN "<td>" & IF ( ISBLANK ( _sb ), "–", FORMAT ( _sb, "#,0.0" ) ) & IF ( ISBLANK ( _sp ), "", "<span class='chip " & IF ( ( _sp > 0 ) = ( 1 = 1 ), "up", "dn" ) & "'>" & IF ( _sp > 0, "▲ ", "▼ " ) & IF ( ABS ( _sp ) >= 10, ">999%", FORMAT ( ABS ( _sp ), "0.0%" ) ) & "</span>" ) & "</td>" ) & ( VAR _sb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 33, Dim_Period[PeriodKey] = "B2027" )
+                VAR _sc = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 33, Dim_Period[PeriodKey] = _k )
+                VAR _sp = IF ( NOT ISBLANK ( _sb ) && NOT ISBLANK ( _sc ), DIVIDE ( _sb - _sc, ABS ( _sc ) ) )
+                RETURN "<td>" & IF ( ISBLANK ( _sb ), "–", FORMAT ( _sb, "#,0.0" ) ) & IF ( ISBLANK ( _sp ), "", "<span class='chip " & IF ( ( _sp > 0 ) = ( 1 = 1 ), "up", "dn" ) & "'>" & IF ( _sp > 0, "▲ ", "▼ " ) & IF ( ABS ( _sp ) >= 10, ">999%", FORMAT ( ABS ( _sp ), "0.0%" ) ) & "</span>" ) & "</td>" ) & ( VAR _i = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 16, Dim_Period[PeriodKey] = "B2027" )
+                VAR _a = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 23, Dim_Period[PeriodKey] = "B2027" )
+                VAR _pb = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "B2027" )
+                RETURN "<td>" & IF ( _i > 0, FORMAT ( DIVIDE ( _a, _i ), "0.0%" ), "–" ) & "</td><td>" & FORMAT ( DIVIDE ( _pb, _bankPBT ), "0.0%" ) & "</td>" ) & "</tr>",
+            "", Dim_Unit[Level], DESC, Dim_Unit[SortOrder], ASC )
+        & "</tbody></table>"
+MEASURE _Measures[HTML Tracker] =
+    VAR _n = [Trk Line]
+    VAR _hib = [Trk HIB]
+    RETURN
+        "<table class='tk'><thead><tr><th>Unit</th><th>Budget 2026</th><th>YTD Sep-26</th><th>Proj Dec-26</th><th class='l'>YTD progress (75% = on pace)</th><th>Proj / budget</th><th>Q4 needed</th><th>Avg quarter</th><th class='l'>Status</th></tr></thead><tbody>"
+        & CONCATENATEX (
+            FILTER ( ALL ( Dim_Unit ), Dim_Unit[Level] <= 1 ),
+            VAR _b = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = _n, Dim_Period[PeriodKey] = "B2026" )
+            VAR _y = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = _n, Dim_Period[PeriodKey] = "A2026S" )
+            VAR _p = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = _n, Dim_Period[PeriodKey] = "P2026" )
+            VAR _pr = IF ( _b > 0, DIVIDE ( _y, _b ) )
+            VAR _r = DIVIDE ( _p, _b )
+            VAR _st =
+                SWITCH ( TRUE (),
+                    ISBLANK ( _b ) || ISBLANK ( _p ), "n|·|No budget",
+                    _hib = 0, IF ( _p <= _b * 1.005, "g|✓|Within budget", IF ( _p <= _b * 1.05, "a|!|Watch", "r|✕|Over budget" ) ),
+                    _b <= 0, IF ( _p >= _b, "g|✓|Better than budget", "r|✕|Worse than budget" ),
+                    _r >= 0.995, "g|✓|On track", _r >= 0.9, "a|!|Watch", "r|✕|Behind" )
+            RETURN
+                "<tr class='" & IF ( Dim_Unit[Level] = 0, "tot", "" ) & "'><td><b>" & Dim_Unit[ShortName] & "</b></td><td>" & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) ) & "</td><td>" & IF ( ISBLANK ( _y ), "–", FORMAT ( _y, "#,0.0" ) ) & "</td><td>" & IF ( ISBLANK ( _p ), "–", FORMAT ( _p, "#,0.0" ) ) & "</td>"
+                & "<td class='l'>" & IF ( ISBLANK ( _pr ), "", "<div class='pb2'><span style='width:" & FORMAT ( MIN ( 1, MAX ( 0, _pr ) ) * 100, "0" ) & "%'></span><i></i></div>" ) & "</td>"
+                & "<td>" & IF ( _b > 0, FORMAT ( _r, "0%" ), "–" ) & "</td><td>" & IF ( ISBLANK ( _b - _y ), "–", FORMAT ( _b - _y, "#,0.0" ) ) & "</td><td>" & IF ( ISBLANK ( DIVIDE ( _y, 3 ) ), "–", FORMAT ( DIVIDE ( _y, 3 ), "#,0.0" ) ) & "</td>"
+                & "<td class='l'><span class='st " & PATHITEM ( _st, 1 ) & "'>" & PATHITEM ( _st, 2 ) & " " & PATHITEM ( _st, 3 ) & "</span></td></tr>",
+            "", Dim_Unit[SortOrder], ASC )
+        & "</tbody></table>"
+MEASURE _Measures[HTML Landing] =
+    "<div class='ld'>" & CONCATENATEX (
+            FILTER ( ALL ( Dim_Unit ), Dim_Unit[Level] <= 1 ),
+            VAR _b = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "B2026" )
+            VAR _p = CALCULATE ( [Amount (Axis)], Dim_Line[LineNo] = 28, Dim_Period[PeriodKey] = "P2026" )
+            VAR _r = DIVIDE ( _p, _b )
+            VAR _c = SWITCH ( TRUE (), _r >= 0.995, "#2457A6", _r >= 0.9, "#38B2C8", "#B42318" )
+            RETURN
+                "<div class='lr'><b>" & Dim_Unit[ShortName] & "</b>"
+                & IF ( _b > 0,
+                    "<div class='lt'><span style='width:" & FORMAT ( MIN ( 1, MAX ( 0, _r / 1.5 ) ) * 100, "0" ) & "%;background:" & _c & "'></span><i></i></div><em>" & FORMAT ( _r, "0%" ) & "</em>",
+                    "<div class='lx'>Loss unit: bud " & IF ( ISBLANK ( _b ), "–", FORMAT ( _b, "#,0.0" ) ) & ", proj " & IF ( ISBLANK ( _p ), "–", FORMAT ( _p, "#,0.0" ) ) & IF ( _p >= _b, " ✓", " ✕" ) & "</div>" )
+                & "</div>",
+            "", Dim_Unit[SortOrder], ASC )
+        & "<div class='lf'>Projected Dec-26 PBT as % of Budget 2026. Line = 100%.</div></div>"
+MEASURE _Measures[HTML Income Mix] =
+    VAR _t0 =
+        FILTER ( ADDCOLUMNS ( ALL ( 'Income Mix' ), "@lab", 'Income Mix'[Component], "@v", VAR _ln = 'Income Mix'[LineNo] RETURN CALCULATE ( [Budget 2027], Dim_Line[LineNo] = _ln ), "@o", 'Income Mix'[Sort] ), [@v] > 0 )
+    VAR _t =
+        ADDCOLUMNS ( _t0, "@i", VAR _o = [@o] RETURN COUNTROWS ( FILTER ( _t0, [@o] <= _o ) ) )
+    VAR _tot = SUMX ( _t, [@v] )
+    VAR _rows =
+        ADDCOLUMNS ( _t,
+            "@cum", VAR _i = [@i] RETURN SUMX ( FILTER ( _t, [@i] < _i ), [@v] ),
+            "@c", SWITCH ( [@i], 1, "#2457A6", 2, "#B87A00", 3, "#E87BA4", 4, "#00875A", 5, "#6250D6", "#A3ABB8" ) )
+    VAR _arcs =
+        CONCATENATEX ( _rows,
+            "<circle cx='60' cy='60' r='46' class='ds' style='stroke:" & [@c] & "' stroke-dasharray='"
+                & FORMAT ( MAX ( 0, [@v] / _tot * 289.03 - 1.5 ), "0.00" ) & " 289.03' stroke-dashoffset='"
+                & FORMAT ( - [@cum] / _tot * 289.03, "0.00" ) & "' transform='rotate(-90 60 60)'/>",
+            "", [@i], ASC )
+    VAR _leg =
+        CONCATENATEX ( _rows,
+            "<div class='dr'><i style='background:" & [@c] & "'></i><span>" & [@lab] & "</span><b>" & FORMAT ( [@v], "#,0.0" )
+                & "</b><em>" & FORMAT ( DIVIDE ( [@v], _tot ), "0%" ) & "</em></div>",
+            "", [@i], ASC )
+    RETURN
+        IF ( _tot > 0,
+            "<div class='dn'><svg viewBox='0 0 120 120' class='dsv'><circle cx='60' cy='60' r='46' class='dbg'/>" & _arcs
+            & "<text x='60' y='59' class='dt'>" & FORMAT ( [Total Income B27], "#,0.0" ) & "</text><text x='60' y='72' class='dl'>Total income</text></svg>"
+            & "<div class='dlg'><div class='dh'><span>Component</span><b>" & IF ( [Divisor] = 1000, "PKR Bn", "PKR Mn" ) & "</b><em>Share</em></div>" & _leg & "</div></div>",
+            "<div class='dn empty'>Mix not available for this unit</div>" )
+MEASURE _Measures[HTML Deposit Mix] =
+    VAR _g =
+        GROUPBY (
+            ADDCOLUMNS (
+                FILTER ( ALL ( Dim_Product ), Dim_Product[Portfolio] = "Deposits" && Dim_Product[RowType] = "Product" ),
+                "@grp", IF ( Dim_Product[Product] IN { "Current", "Saving", "Notice Deposits", "Term Deposits", "FCY Deposits" }, SUBSTITUTE ( Dim_Product[Product], " Deposits", "" ), "Other" ),
+                "@ord", SWITCH ( Dim_Product[Product], "Current", 1, "Saving", 2, "Notice Deposits", 3, "Term Deposits", 4, "FCY Deposits", 5, 9 ),
+                "@val", CALCULATE ( [Portfolio B27], Fact_Portfolio[Metric] = "Absolute" )
+            ),
+            [@grp],
+            "@gv", SUMX ( CURRENTGROUP (), [@val] ),
+            "@go", MINX ( CURRENTGROUP (), [@ord] )
+        )
+    VAR _t0 =
+        FILTER ( ADDCOLUMNS ( _g, "@lab", [@grp], "@v", [@gv], "@o", [@go] ), [@v] > 0 )
+    VAR _t =
+        ADDCOLUMNS ( _t0, "@i", VAR _o = [@o] RETURN COUNTROWS ( FILTER ( _t0, [@o] <= _o ) ) )
+    VAR _tot = SUMX ( _t, [@v] )
+    VAR _rows =
+        ADDCOLUMNS ( _t,
+            "@cum", VAR _i = [@i] RETURN SUMX ( FILTER ( _t, [@i] < _i ), [@v] ),
+            "@c", SWITCH ( [@i], 1, "#2457A6", 2, "#B87A00", 3, "#E87BA4", 4, "#00875A", 5, "#6250D6", "#A3ABB8" ) )
+    VAR _arcs =
+        CONCATENATEX ( _rows,
+            "<circle cx='60' cy='60' r='46' class='ds' style='stroke:" & [@c] & "' stroke-dasharray='"
+                & FORMAT ( MAX ( 0, [@v] / _tot * 289.03 - 1.5 ), "0.00" ) & " 289.03' stroke-dashoffset='"
+                & FORMAT ( - [@cum] / _tot * 289.03, "0.00" ) & "' transform='rotate(-90 60 60)'/>",
+            "", [@i], ASC )
+    VAR _leg =
+        CONCATENATEX ( _rows,
+            "<div class='dr'><i style='background:" & [@c] & "'></i><span>" & [@lab] & "</span><b>" & FORMAT ( [@v], "#,0.0" )
+                & "</b><em>" & FORMAT ( DIVIDE ( [@v], _tot ), "0%" ) & "</em></div>",
+            "", [@i], ASC )
+    RETURN
+        IF ( _tot > 0,
+            "<div class='dn'><svg viewBox='0 0 120 120' class='dsv'><circle cx='60' cy='60' r='46' class='dbg'/>" & _arcs
+            & "<text x='60' y='59' class='dt'>" & FORMAT ( _tot, "#,0.0" ) & "</text><text x='60' y='72' class='dl'>Total deposits</text></svg>"
+            & "<div class='dlg'><div class='dh'><span>Component</span><b>" & IF ( [Divisor] = 1000, "PKR Bn", "PKR Mn" ) & "</b><em>Share</em></div>" & _leg & "</div></div>",
+            "<div class='dn empty'>Mix not available for this unit</div>" )
+
+EVALUATE
+SUMMARIZECOLUMNS ( Dim_Unit[ShortName], "PBT Budget 2027", [Seg PBT B27] )
